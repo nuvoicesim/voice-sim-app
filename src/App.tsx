@@ -16,11 +16,23 @@ import { autoCompletePreviousSteps, getNextStep, selectAllSteps, selectCompleted
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import type { RootState } from './store';
 import { fetchUserAttributes } from 'aws-amplify/auth';
+import Demo from './poc/pages/Demo';
+import Player from "./poc/pages/Player";
 
 function App() {
+  const location = useLocation();
+  // POC routes 
+  if (location.pathname.startsWith('/poc')) {
+    return (
+      <Routes>
+        <Route path="/poc/demo" element={<Demo />} />
+        <Route path="/poc/player" element={<Player />} />
+      </Routes>
+    );
+  }
+
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const location = useLocation();
   const steps = useSelector((state: RootState) => selectAllSteps(state));
   const completedStepPaths = useSelector((state: RootState) => selectCompletedStepPaths(state));
 
@@ -43,7 +55,7 @@ function App() {
       
       // Load Current Completed Step from Cognito
       const attrs = await fetchUserAttributes();
-      const completedStep = attrs['custom:currentCompletedStep']; 
+      const completedStep = attrs['custom:currentCompletedStep'];
       
       if (completedStep) {
         dispatch(setCurrentCompletedStep(completedStep));
