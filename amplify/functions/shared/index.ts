@@ -12,6 +12,12 @@ export * from './database';
 // Export all general utilities
 export * from './utils';
 
+// Export CORS helpers
+export * from './cors';
+
+// Export OpenAI helpers
+export * from './openai';
+
 // Re-export commonly used types for convenience
 export type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 export type { APIGatewayProxyHandler, APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
