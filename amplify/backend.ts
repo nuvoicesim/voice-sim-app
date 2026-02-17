@@ -14,6 +14,8 @@ import { debriefFunction } from "./functions/debrief-function/resource";
 import { cognitoUserFunction } from "./functions/cognito-user-function/resource";
 import { authFunction } from "./functions/auth-function/resource";
 import { downloadUrlFunction } from "./functions/download-url-function/resource";
+import { llmDialogueFunction } from "./functions/llm-dialogue-function/resource";
+import { llmScoringFunction } from "./functions/llm-scoring-function/resource";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
@@ -29,6 +31,8 @@ const backend = defineBackend({
   cognitoUserFunction,
   authFunction,
   downloadUrlFunction,
+  llmDialogueFunction,
+  llmScoringFunction,
 });
 
 // Function wrapper list
@@ -108,6 +112,61 @@ backend.downloadUrlFunction.resources.lambda.addToRolePolicy(
   })
 );
 
+// Configure LLM functions environment variables
+const defaultLlmAllowedOrigins = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173";
+const llmEnvShared = {
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "",
+  LLM_ALLOWED_ORIGINS: process.env.LLM_ALLOWED_ORIGINS ?? defaultLlmAllowedOrigins,
+  LLM_UPSTREAM_RETRIES: process.env.LLM_UPSTREAM_RETRIES ?? "1",
+};
+
+for (const [key, value] of Object.entries(llmEnvShared)) {
+  backend.llmDialogueFunction.addEnvironment(key, value);
+  backend.llmScoringFunction.addEnvironment(key, value);
+}
+
+// Dialogue gets 12s upstream timeout; scoring gets 25s (larger prompts + rubric generation)
+backend.llmDialogueFunction.addEnvironment("LLM_TIMEOUT_MS", process.env.LLM_TIMEOUT_MS ?? "12000");
+backend.llmScoringFunction.addEnvironment("LLM_TIMEOUT_MS", process.env.LLM_SCORING_TIMEOUT_MS ?? "25000");
+
+backend.llmDialogueFunction.addEnvironment(
+  "LLM_DIALOGUE_MODEL",
+  process.env.LLM_DIALOGUE_MODEL ?? "gpt-4o"
+);
+backend.llmDialogueFunction.addEnvironment(
+  "LLM_DIALOGUE_TEMPERATURE",
+  process.env.LLM_DIALOGUE_TEMPERATURE ?? "0.7"
+);
+backend.llmDialogueFunction.addEnvironment(
+  "LLM_DIALOGUE_MAX_OUTPUT_TOKENS",
+  process.env.LLM_DIALOGUE_MAX_OUTPUT_TOKENS ?? "220"
+);
+backend.llmDialogueFunction.addEnvironment(
+  "LLM_DIALOGUE_MAX_HISTORY",
+  process.env.LLM_DIALOGUE_MAX_HISTORY ?? "20"
+);
+backend.llmDialogueFunction.addEnvironment(
+  "LLM_MAX_INPUT_CHARS",
+  process.env.LLM_MAX_INPUT_CHARS ?? "12000"
+);
+
+backend.llmScoringFunction.addEnvironment(
+  "LLM_SCORING_MODEL",
+  process.env.LLM_SCORING_MODEL ?? "gpt-4o"
+);
+backend.llmScoringFunction.addEnvironment(
+  "LLM_SCORING_TEMPERATURE",
+  process.env.LLM_SCORING_TEMPERATURE ?? "0.8"
+);
+backend.llmScoringFunction.addEnvironment(
+  "LLM_SCORING_MAX_OUTPUT_TOKENS",
+  process.env.LLM_SCORING_MAX_OUTPUT_TOKENS ?? "3000"
+);
+backend.llmScoringFunction.addEnvironment(
+  "LLM_SCORING_MAX_INPUT_CHARS",
+  process.env.LLM_SCORING_MAX_INPUT_CHARS ?? "50000"
+);
+
 // create a new API stack
 const apiStack = backend.createStack("api-stack");
 
@@ -152,6 +211,14 @@ const authLambdaIntegration = new LambdaIntegration(
 
 const downloadUrlLambdaIntegration = new LambdaIntegration(
   backend.downloadUrlFunction.resources.lambda
+);
+
+const llmDialogueLambdaIntegration = new LambdaIntegration(
+  backend.llmDialogueFunction.resources.lambda
+);
+
+const llmScoringLambdaIntegration = new LambdaIntegration(
+  backend.llmScoringFunction.resources.lambda
 );
 
 // create a new resource path with no authorization for pre-survey
@@ -211,6 +278,28 @@ authPath.addResource("signout").addMethod("POST", authLambdaIntegration, {
 // create a new resource path for download URL
 const downloadPath = myRestApi.root.addResource("download-url");
 downloadPath.addMethod("POST", downloadUrlLambdaIntegration, {
+  authorizationType: AuthorizationType.NONE,
+});
+
+// create resource path for llm-dialogue
+const llmDialoguePath = myRestApi.root.addResource("llm-dialogue");
+llmDialoguePath.addMethod("POST", llmDialogueLambdaIntegration, {
+  authorizationType: AuthorizationType.NONE,
+});
+
+const llmDialogueHealthPath = llmDialoguePath.addResource("health");
+llmDialogueHealthPath.addMethod("GET", llmDialogueLambdaIntegration, {
+  authorizationType: AuthorizationType.NONE,
+});
+
+// create resource path for llm-scoring
+const llmScoringPath = myRestApi.root.addResource("llm-scoring");
+llmScoringPath.addMethod("POST", llmScoringLambdaIntegration, {
+  authorizationType: AuthorizationType.NONE,
+});
+
+const llmScoringHealthPath = llmScoringPath.addResource("health");
+llmScoringHealthPath.addMethod("GET", llmScoringLambdaIntegration, {
   authorizationType: AuthorizationType.NONE,
 });
 
