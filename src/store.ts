@@ -1,14 +1,22 @@
 import { configureStore } from '@reduxjs/toolkit';
 import stepReducer from './reducer';
+import authReducer from './slices/authSlice';
+import assignmentReducer from './slices/assignmentSlice';
+import sessionReducer from './slices/sessionSlice';
+import { setStoreRef } from './storeRef';
 
-// Configure the store
 export const store = configureStore({
   reducer: {
     steps: stepReducer,
+    auth: authReducer,
+    assignments: assignmentReducer,
+    sessions: sessionReducer,
   },
 });
 
-// Infer the `RootState` type from the store itself
-export type RootState = ReturnType<typeof store.getState>;
+setStoreRef(store);
 
-export default store; 
+export type RootState = ReturnType<typeof store.getState>;
+export type AppDispatch = typeof store.dispatch;
+
+export default store;

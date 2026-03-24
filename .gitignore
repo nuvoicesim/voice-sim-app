@@ -16,6 +16,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.cursor
 .DS_Store
 *.suo
 *.ntvs*
@@ -36,4 +37,4 @@ amplifyconfiguration*
 .local-docs
 
 # local test suite
-/tests/
+tests

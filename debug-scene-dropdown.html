@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scene Dropdown Debug Helper</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      background: #f5f5f5;
+    }
+    .card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 1rem;
+    }
+    h1 { color: #333; margin-top: 0; }
+    h2 { color: #555; margin-top: 0; font-size: 1.2rem; }
+    pre {
+      background: #f8f8f8;
+      padding: 1rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      border: 1px solid #ddd;
+    }
+    code { font-family: 'Courier New', monospace; }
+    .error { color: #d32f2f; }
+    .success { color: #388e3c; }
+    .warning { color: #f57c00; }
+    button {
+      background: #5c7cfa;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    button:hover { background: #4c6ef5; }
+    .instructions {
+      background: #e3f2fd;
+      padding: 1rem;
+      border-radius: 4px;
+      border-left: 4px solid #2196f3;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Scene Dropdown Debug Helper</h1>
+  
+  <div class="card instructions">
+    <h2>Instructions:</h2>
+    <ol>
+      <li>Open your app at <code>http://localhost:5173/faculty/assignments/new</code></li>
+      <li>Open the browser DevTools (F12)</li>
+      <li>Go to the Console tab</li>
+      <li>Copy and paste the script below into the console</li>
+      <li>Press Enter to run it</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>📋 Debug Script (Copy this to console)</h2>
+    <pre><code>// Scene Dropdown Debug Script
+console.log('🔍 Starting Scene Dropdown Diagnostic...\n');
+
+// 1. Check if the page loaded properly
+console.log('1️⃣ Checking page elements...');
+const sceneDropdown = document.querySelector('[data-testid*="scene"], input[placeholder*="Select a simulation"], input[placeholder*="scene"]');
+const allSelects = document.querySelectorAll('select, input[role="combobox"], [class*="Select"]');
+console.log('Scene dropdown element:', sceneDropdown);
+console.log('All select/combobox elements found:', allSelects.length);
+allSelects.forEach((el, i) => {
+  console.log(`  Select ${i}:`, el.getAttribute('placeholder') || el.textContent?.substring(0, 50));
+});
+
+// 2. Check React component state (if accessible)
+console.log('\n2️⃣ Checking React component state...');
+try {
+  const rootElement = document.getElementById('root');
+  if (rootElement && rootElement._reactRootContainer) {
+    console.log('React root found');
+  }
+} catch (e) {
+  console.log('Unable to access React internals (expected)');
+}
+
+// 3. Check for network requests
+console.log('\n3️⃣ Checking Network Activity...');
+console.log('Open the Network tab to see if the /scene-catalog API call was made');
+console.log('Look for: GET request to endpoint containing "scene-catalog"');
+
+// 4. Look for errors in console
+console.log('\n4️⃣ Checking for errors...');
+const errors = window.console.error;
+console.log('Console errors should appear above (if any)');
+
+// 5. Manual check instructions
+console.log('\n5️⃣ Manual Checks:');
+console.log('✓ Is the Scene dropdown visible on the page?');
+console.log('✓ Can you click on the Scene dropdown?');
+console.log('✓ When you click it, does a menu appear?');
+console.log('✓ Is the dropdown menu empty or does it have items?');
+console.log('✓ Check Network tab: Did the scene-catalog API call succeed (200)?');
+console.log('✓ If API call succeeded, what was the response body?');
+
+console.log('\n📊 Quick Visual Test:');
+console.log('Run this to highlight the Scene dropdown:');
+console.log('document.querySelector(\'[placeholder*="Select a simulation"]\')?.style.border = "3px solid red"');
+
+console.log('\n✅ Diagnostic complete!');</code></pre>
+  </div>
+
+  <div class="card">
+    <h2>🌐 Network Tab Checklist</h2>
+    <ol>
+      <li>Look for a request to <code>scene-catalog</code></li>
+      <li>Check the status code (should be 200)</li>
+      <li>Click on the request to see the response body</li>
+      <li>The response should have format: <code>{ "scenes": [...] }</code></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>🎯 What to Report Back</h2>
+    <ul>
+      <li><strong>Dropdown State:</strong> Empty or has items?</li>
+      <li><strong>API Call:</strong> Success (200) or error?</li>
+      <li><strong>Response Data:</strong> What did the API return?</li>
+      <li><strong>Console Errors:</strong> Any red error messages?</li>
+      <li><strong>Clickable:</strong> Can you click and open the dropdown?</li>
+    </ul>
+  </div>
+</body>
+</html>

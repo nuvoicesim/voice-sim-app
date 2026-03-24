@@ -42,6 +42,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
     
     if (method === "POST") {
+      console.warn("[DEPRECATED] POST /debrief using legacy userID+simulationLevel key. Migrate to session-based evaluation flow.");
       return await handleSaveDebrief(event.body);
     }
 

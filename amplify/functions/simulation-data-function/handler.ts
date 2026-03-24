@@ -42,6 +42,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
     
     if (method === "POST") {
+      console.warn("[DEPRECATED] POST /simulation-data using legacy userID+simulationLevel key. Migrate to POST /sessions flow.");
       return await handleSaveSimulationData(event.body);
     }
 

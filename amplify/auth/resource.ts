@@ -16,5 +16,11 @@ export const auth = defineAuth({
       maxLen: 50,
       minLen: 1,
     },
+    "custom:role": {
+      dataType: "String",
+      mutable: true,
+      maxLen: 20,
+      minLen: 1,
+    },
   }
 });

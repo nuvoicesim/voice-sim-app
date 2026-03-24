@@ -1,12 +1,12 @@
-# Nurse Town API Handbook
+# VOICE API Handbook
 
 ## Overview
-This document provides API interface specifications for the Unity development team working with the Nurse Town application, including authentication and simulation data management functionality.
+This document provides API interface specifications for the Unity development team working with the Nurse Town application, including authentication, simulation data management, and AI service endpoints.
 
 ## Environment Configuration
 
 ### Sandbox (Development Environment)
-- **Base URL**: `https://gu6dg3g185.execute-api.us-west-2.amazonaws.com/dev`
+- **Base URL**: `https://f0kk74qeyf.execute-api.us-west-2.amazonaws.com/dev`
 - **Purpose**: Development and testing, data will not affect production environment
 
 ### Production (Production Environment)
@@ -190,3 +190,337 @@ Content-Type: application/json
 }
 ```
 
+### 3. LLM APIs
+
+Two endpoints for LLM-powered patient simulation: dialogue generation and session scoring.
+System prompts are managed server-side; clients only send conversation turns.
+Model: `gpt-4o` for both endpoints.
+
+#### 3.1 LLM Dialogue
+- **Endpoint**: `/llm-dialogue`
+- **Method**: `POST`
+- **Health Check**: `GET /llm-dialogue/health`
+- **Description**: Generates a simulated patient response. The backend resolves the system prompt from `simulationLevel` (1→task1, 2→task2, 3→task3).
+
+**Request Headers**:
+```
+Content-Type: application/json
+X-Request-ID: <optional, for tracing>
+```
+
+**Request Body**:
+```json
+{
+  "userID": "7811e3a0-a061-70d2-c7d6-315cd36795c4",
+  "simulationLevel": 1,
+  "messages": [
+    { "role": "user", "content": "Hello, how are you feeling today?" }
+  ],
+  "metadata": {
+    "sessionId": "session-20260217-001",
+    "turnIndex": 1,
+    "client": "unity"
+  }
+}
+```
+
+**Required Fields**:
+- `userID`: string (UUID)
+- `simulationLevel`: integer (1, 2, or 3)
+- `messages`: non-empty array
+- `messages[].role`: `"user"` or `"assistant"` (do NOT send `"system"`)
+- `messages[].content`: non-empty string
+
+**Optional Fields**:
+- `options.temperature`: number (default: `0.7`)
+- `options.maxOutputTokens`: number (default: `220`)
+- `metadata.sessionId`: string
+- `metadata.turnIndex`: number
+- `metadata.client`: string
+
+**Success Response** (200):
+```json
+{
+  "requestId": "9d7f4f4f-bc81-4c37-99a8-25de0a8f8f44",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "{\"responseText\":\"um... okay... little... tired...\",\"emotionCode\":0,\"motionCode\":5}"
+      }
+    }
+  ],
+  "model": "gpt-4o",
+  "usage": {
+    "inputTokens": 3361,
+    "outputTokens": 23,
+    "totalTokens": 3384
+  },
+  "latencyMs": 1627,
+  "createdAt": "2026-02-17T01:27:22.781Z",
+  "metadata": {
+    "scenario": "task1",
+    "promptVersion": "task1-dialogue-v1",
+    "fallbackUsed": false,
+    "malformedRetryTriggered": false
+  }
+}
+```
+
+The `choices[0].message.content` field is a **JSON string**. When parsed:
+
+```json
+{
+  "responseText": "um... okay... little... tired...",
+  "emotionCode": 0,
+  "motionCode": 5
+}
+```
+
+- `responseText` (string): patient's spoken dialogue
+- `emotionCode` (integer, 0–9): facial emotion animation index
+- `motionCode` (integer, 0–9): body motion animation index
+
+If the backend cannot produce a valid response after retrying, it returns a safe fallback (`metadata.fallbackUsed: true`):
+```json
+{
+  "responseText": "I.. I don't k-know...",
+  "emotionCode": 7,
+  "motionCode": 1
+}
+```
+
+**Multi-turn Usage**: Send the full conversation history each turn. The backend caps at the most recent 20 messages.
+
+**Failure Responses**:
+
+- `400`: Missing or invalid required fields
+```json
+{
+  "error": "messages must be a non-empty array",
+  "requestId": "...",
+  "retryable": false
+}
+```
+
+- `413`: Prompt exceeds allowed size
+- `429`: Rate limit exceeded (`retryable: true`)
+- `502`: LLM provider timeout or unavailable (`retryable: true`)
+- `500`: Internal server error
+
+#### 3.2 LLM Scoring
+- **Endpoint**: `/llm-scoring`
+- **Method**: `POST`
+- **Health Check**: `GET /llm-scoring/health`
+- **Description**: Scores a completed simulation session against a rubric and returns a structured evaluation report. Call once at session end.
+
+**Request Headers**:
+```
+Content-Type: application/json
+X-Request-ID: <optional, for tracing>
+```
+
+**Request Body**:
+```json
+{
+  "userID": "7811e3a0-a061-70d2-c7d6-315cd36795c4",
+  "simulationLevel": 1,
+  "conversationTurns": [
+    { "patient": "I... uh... fine...", "nurse": "Hi Karen, how are you today?" },
+    { "patient": "Talk... hard...", "nurse": "Take your time. I'm here to help." },
+    { "patient": "Head... hurt...", "nurse": "I understand. Can you point to where it hurts?" },
+    { "patient": "C-c-cat...", "nurse": "Very good! Now can you say 'dog'?" },
+    { "patient": "D... dog.", "nurse": "Excellent! You're doing great." }
+  ],
+  "metadata": {
+    "sessionId": "session-20260217-001",
+    "turnIndex": 10,
+    "client": "unity"
+  }
+}
+```
+
+**Required Fields**:
+- `userID`: string (UUID)
+- `simulationLevel`: integer (1, 2, or 3)
+- `conversationTurns`: non-empty array of turn objects
+- `conversationTurns[].patient`: non-empty string
+- `conversationTurns[].nurse`: non-empty string
+
+**Optional Fields**:
+- `metadata.sessionId`: string
+- `metadata.turnIndex`: number
+- `metadata.client`: string
+
+**Success Response** (200):
+```json
+{
+  "requestId": "9d7f4f4f-bc81-4c37-99a8-25de0a8f8f44",
+  "report": {
+    "criteria": [
+      {
+        "name": "Greeting and Professional Introduction",
+        "score": 2,
+        "maxScore": 3,
+        "explanation": "You began by greeting the patient by name, which is a good start..."
+      },
+      {
+        "name": "Use of Supported Conversation Techniques",
+        "score": 2,
+        "maxScore": 3,
+        "explanation": "You provided encouragement and reassurance..."
+      }
+    ],
+    "totalScore": 17,
+    "performanceLevel": "Developing",
+    "overallExplanation": "Your session demonstrated several strengths..."
+  },
+  "model": "gpt-4o",
+  "latencyMs": 10773,
+  "createdAt": "2026-02-17T01:27:39.070Z"
+}
+```
+
+**Report Fields**:
+- `report.criteria`: array of 8 rubric criteria, each with `name`, `score` (1–3), `maxScore` (3), and `explanation`
+- `report.totalScore`: integer (sum of all scores, range 8–24)
+- `report.performanceLevel`: `"Outstanding"` (22–24) | `"Proficient"` (18–21) | `"Developing"` (14–17) | `"Needs Improvement"` (8–13)
+- `report.overallExplanation`: summary feedback paragraph
+
+**Rubric Criteria** (8 total):
+1. Greeting and Professional Introduction
+2. Use of Supported Conversation Techniques
+3. Case History Questions
+4. Automatic Speech Tasks
+5. Repetition Tasks
+6. Responsive Naming Tasks
+7. Word Filling or Sentence Completion Tasks
+8. Session Closure
+
+**Failure Responses**: Same error envelope and status codes as dialogue endpoint.
+
+#### 3.3 Error Response Contract
+
+All LLM error responses use the same envelope:
+```json
+{
+  "error": "Human-readable message",
+  "requestId": "9d7f4f4f-bc81-4c37-99a8-25de0a8f8f44",
+  "retryable": false
+}
+```
+
+**Error Code Descriptions**:
+- `400`: Invalid payload or missing required fields
+- `413`: Prompt exceeds allowed size
+- `429`: Rate limit exceeded (`retryable: true`)
+- `502`: LLM provider timeout or unavailable (`retryable: true`)
+- `500`: Internal server error
+
+#### 3.4 Latency Expectations
+
+- **Dialogue**: 1–3s typical, ~5s p95
+- **Scoring**: 8–15s typical, ~20s p95 (full rubric generation)
+
+### 4. TTS API
+
+Text-to-Speech endpoint for Unity voice playback and character timing alignment.
+Provider details are managed server-side.
+
+#### 4.1 TTS Synthesis
+- **Endpoint**: `/tts`
+- **Method**: `POST`
+- **Description**: Converts input text to PCM audio and returns optional character-level alignment.
+
+**Request Headers**:
+```
+Content-Type: application/json
+X-Request-ID: <optional, for tracing>
+Authorization: Bearer <access_token> (required when auth is enabled for the environment)
+```
+
+**Request Body**:
+```json
+{
+  "userID": "7811e3a0-a061-70d2-c7d6-315cd36795c4",
+  "simulationLevel": 2,
+  "scenario": "task2",
+  "text": "I... need help speaking.",
+  "voiceProfile": {
+    "profileId": "patient_task2_primary",
+    "voiceId": "VOICE_ID_FROM_TEAM_CONFIG",
+    "modelId": "eleven_multilingual_v2",
+    "stability": 0.4,
+    "similarityBoost": 0.75,
+    "styleExaggeration": 0.3,
+    "speed": 1.0
+  },
+  "options": {
+    "format": "pcm_16000",
+    "includeAlignment": true
+  },
+  "metadata": {
+    "sessionId": "session-20260217-001",
+    "turnIndex": 12,
+    "client": "unity"
+  }
+}
+```
+
+**Required Fields**:
+- `userID`: string (UUID)
+- `simulationLevel`: integer (1, 2, or 3)
+- `text`: non-empty string
+- `voiceProfile.voiceId`: non-empty string
+- `voiceProfile.modelId`: non-empty string
+
+**Optional Fields**:
+- `scenario`: string (for client traceability)
+- `voiceProfile.profileId`: string
+- `voiceProfile.stability`: number (0.0–1.0)
+- `voiceProfile.similarityBoost`: number (0.0–1.0)
+- `voiceProfile.styleExaggeration`: number (0.0–1.0)
+- `voiceProfile.speed`: number (0.7–1.2)
+- `options.format`: string (default `pcm_16000`)
+- `options.includeAlignment`: boolean (default `true`)
+- `metadata.sessionId`: string
+- `metadata.turnIndex`: number
+- `metadata.client`: string
+
+**Voice Selection Policy**:
+- Backend resolves the effective `voiceId` from `simulationLevel` for consistency across clients.
+- Client-provided `voiceProfile.voiceId` is accepted but may be overridden by server policy.
+
+**Success Response** (200):
+```json
+{
+  "audio_base64": "BASE64_PCM_BYTES",
+  "alignment": {
+    "characters": ["H", "e", "l", "l", "o"],
+    "character_start_times_seconds": [0.01, 0.08, 0.12, 0.17, 0.24],
+    "character_end_times_seconds": [0.07, 0.11, 0.16, 0.23, 0.31]
+  },
+  "provider": "elevenlabs",
+  "requestId": "9d7f4f4f-bc81-4c37-99a8-25de0a8f8f44"
+}
+```
+
+**Response Notes**:
+- `audio_base64` decodes to PCM 16-bit mono @ 16kHz (`pcm_16000`).
+- When `includeAlignment=true`, `alignment` includes character arrays and matching timing arrays.
+
+**Failure Response** (4xx/5xx):
+```json
+{
+  "error": "Invalid voice settings: speed out of range",
+  "requestId": "9d7f4f4f-bc81-4c37-99a8-25de0a8f8f44",
+  "retryable": false
+}
+```
+
+**Error Code Descriptions**:
+- `400`: Invalid payload or missing required fields
+- `401` / `403`: Authentication or authorization failed
+- `429`: Rate limit exceeded (`retryable: true`)
+- `502`: TTS provider timeout or unavailable (`retryable: true`)
+- `500`: Internal server error

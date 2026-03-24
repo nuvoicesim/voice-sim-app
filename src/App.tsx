@@ -1,116 +1,143 @@
 import { useEffect } from "react";
-import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { Box } from '@mantine/core';
 import TopBar from './TopBar';
-import Sidebar from './MainApp/SideBar';
-import InformedConsent from './MainApp/StepContents/InformedConsent';
-import PreSurvey from './MainApp/StepContents/PreSurvey';
-import SimulationTutorial from './MainApp/StepContents/SimulationTutorial';
-import Level1Simulation from './MainApp/StepContents/Level1Simulation';
-import Level2Simulation from './MainApp/StepContents/Level2Simulation';
-import Level3Simulation from './MainApp/StepContents/Level3Simulation'; 
-import PostSurvey from './MainApp/StepContents/PostSurvey';
-import CompletionPage from './MainApp/StepContents/CompletionPage';
-import { autoCompletePreviousSteps, getNextStep, selectAllSteps, selectCompletedStepPaths, setCurrentCompletedStep, setCurrentUser } from './reducer';
-import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
-import type { RootState } from './store';
+import { useAuthenticator } from '@aws-amplify/ui-react';
 import { fetchUserAttributes } from 'aws-amplify/auth';
+import type { AppDispatch } from './store';
+
+import { setAuth, selectRole } from './slices/authSlice';
+import type { UserRole } from './slices/authSlice';
+import { setCurrentUser } from './reducer';
+
+// Portal components
+import RoleGuard from './components/RoleGuard';
+import PortalLayout from './components/PortalLayout';
+
+// Student portal
+import StudentDashboard from './portals/student/StudentDashboard';
+import AssignmentsPage from './portals/student/AssignmentsPage';
+import SessionRunner from './portals/student/SessionRunner';
+import HistoryPage from './portals/student/HistoryPage';
+import SessionDetailPage from './portals/student/SessionDetailPage';
+
+// Faculty portal
+import FacultyDashboard from './portals/faculty/FacultyDashboard';
+import CreateAssignment from './portals/faculty/CreateAssignment';
+import AssignmentManagement from './portals/faculty/AssignmentManagement';
+import StudentsDataPage from './portals/faculty/StudentsDataPage';
+import AnalysisPage from './portals/faculty/AnalysisPage';
+import SceneManagement from './portals/faculty/SceneManagement';
+
+// Admin portal
+import AdminDashboard from './portals/admin/AdminDashboard';
+import UsersRolesPage from './portals/admin/UsersRolesPage';
+import GlobalAnalyticsPage from './portals/admin/GlobalAnalyticsPage';
+
+const PORTAL_HOME: Record<UserRole, string> = {
+  student: '/student/dashboard',
+  faculty: '/faculty/dashboard',
+  admin: '/admin/dashboard',
+};
 
 function App() {
-  const dispatch = useDispatch();
+  const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
-  const location = useLocation();
-  const steps = useSelector((state: RootState) => selectAllSteps(state));
-  const completedStepPaths = useSelector((state: RootState) => selectCompletedStepPaths(state));
-
   const { user, signOut } = useAuthenticator();
+  const role = useSelector(selectRole);
 
-  // Set current user in Redux when user changes
-  useEffect(() => {
-    if (user?.username) {
-      dispatch(setCurrentUser(user.username));
-    }
-  }, [user?.username, dispatch]);
-
-  // Load user data and sync with Cognito on mount
   useEffect(() => {
     if (!user?.username) return;
 
     const loadUserData = async () => {
-      // First, ensure current user is set in Redux (this initializes user state)
       dispatch(setCurrentUser(user.username));
-      
-      // Load Current Completed Step from Cognito
+
       const attrs = await fetchUserAttributes();
-      const completedStep = attrs['custom:currentCompletedStep']; 
-      
-      if (completedStep) {
-        dispatch(setCurrentCompletedStep(completedStep));
-        dispatch(autoCompletePreviousSteps(getNextStep(completedStep)));
-        
-        // Only auto-navigate if user is on an incomplete step
-        const nextStep = getNextStep(completedStep);
-        const isOnCompletedStep = completedStepPaths.includes(location.pathname);
-        const isOnNextStep = location.pathname === nextStep;
-        
-        // Only navigate if user is not on a completed step or the next step
-        if (!isOnCompletedStep && !isOnNextStep) {
-          navigate(nextStep);
-        }
-      } else {
-        navigate('/informed-consent');
-      }
+      const userRole = (attrs['custom:role'] as UserRole) || 'student';
+
+      dispatch(setAuth({
+        userId: user.username,
+        email: attrs.email,
+        role: userRole,
+      }));
+
+      navigate(PORTAL_HOME[userRole]);
     };
 
     loadUserData();
-  }, [user?.username, dispatch, navigate, location.pathname]);
-  
-  function AppRoutes() {
-    return (
-      <Box 
-        style={{ 
-        background: '#f8f9fa', 
-        minHeight: '100vh',
-        width: '100vw',
-        position: 'relative',
-        overflow: 'hidden'
-      }}
-    >
-      <TopBar signOut={signOut} user={user} />
-      <Sidebar
-        steps={steps.map(step => ({ name: step.name, path: step.path }))}
-        completedSteps={completedStepPaths}
-      />
-      <Box
-        style={{
-          marginLeft: '250px', // Account for sidebar width
-          minHeight: '100vh',
-          width: 'calc(100vw - 250px)', // Full width minus sidebar
-          background: 'white',
-          boxSizing: 'border-box'
-        }}
-      >
-        <Routes>
-          <Route path="/" element={<Navigate to="/informed-consent" replace />} />
-          <Route path="/informed-consent" element={<InformedConsent />} />  
-          <Route path="/pre-survey" element={<PreSurvey />} />
-          <Route path="/simulation-tutorial" element={<SimulationTutorial />} />
-          <Route path="/level-1-simulation" element={<Level1Simulation />} />
-          <Route path="/level-2-simulation" element={<Level2Simulation />} />
-          <Route path="/level-3-simulation" element={<Level3Simulation />} />
-          <Route path="/post-survey" element={<PostSurvey />} />
-          <Route path="/completion" element={<CompletionPage />} />
-        </Routes>
-        </Box>
-      </Box>
-    );
-  }
+  }, [user?.username, dispatch]);
 
   return (
-    <Authenticator>
-      <AppRoutes />
-    </Authenticator>
+    <Box style={{ background: '#f8f9fa', minHeight: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
+      <TopBar signOut={signOut} user={user} role={role} />
+
+      <Box style={{ paddingTop: 56 }}>
+        <Routes>
+          <Route path="/" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+
+          {/* Student Portal */}
+          <Route path="/student/*" element={
+            <RoleGuard allowedRoles={['student']}>
+              <PortalLayout role="student">
+                <Routes>
+                  <Route path="dashboard" element={<StudentDashboard />} />
+                  <Route path="assignments" element={<AssignmentsPage />} />
+                  <Route path="session/:sessionId" element={<SessionRunner />} />
+                  <Route path="session/:sessionId/detail" element={<SessionDetailPage />} />
+                  <Route path="history" element={<HistoryPage />} />
+                  <Route path="*" element={<Navigate to="dashboard" replace />} />
+                </Routes>
+              </PortalLayout>
+            </RoleGuard>
+          } />
+
+          {/* Faculty Portal */}
+          <Route path="/faculty/*" element={
+            <RoleGuard allowedRoles={['faculty', 'admin']}>
+              <PortalLayout role="faculty">
+                <Routes>
+                  <Route path="dashboard" element={<FacultyDashboard />} />
+                  <Route path="assignments/new" element={<CreateAssignment />} />
+                  <Route path="assignments" element={<AssignmentManagement />} />
+                  <Route path="scenes" element={<SceneManagement />} />
+                  <Route path="students" element={<StudentsDataPage />} />
+                  <Route path="analysis" element={<AnalysisPage />} />
+                  <Route path="*" element={<Navigate to="dashboard" replace />} />
+                </Routes>
+              </PortalLayout>
+            </RoleGuard>
+          } />
+
+          {/* Admin Portal */}
+          <Route path="/admin/*" element={
+            <RoleGuard allowedRoles={['admin']}>
+              <PortalLayout role="admin">
+                <Routes>
+                  <Route path="dashboard" element={<AdminDashboard />} />
+                  <Route path="users" element={<UsersRolesPage />} />
+                  <Route path="analytics" element={<GlobalAnalyticsPage />} />
+                  <Route path="*" element={<Navigate to="dashboard" replace />} />
+                </Routes>
+              </PortalLayout>
+            </RoleGuard>
+          } />
+
+          {/* Legacy paths redirect to portal home (Phase 3 deprecation) */}
+          <Route path="/informed-consent" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/pre-survey" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/simulation-tutorial" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/level-1-simulation" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/level-2-simulation" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/level-3-simulation" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/post-survey" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+          <Route path="/completion" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+
+          {/* Catch-all */}
+          <Route path="*" element={<Navigate to={PORTAL_HOME[role]} replace />} />
+        </Routes>
+      </Box>
+    </Box>
   );
 }
 

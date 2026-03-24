@@ -4,7 +4,7 @@
  */
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, TransactWriteCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 
 /**
@@ -198,4 +198,42 @@ export function prepareItemForStorage(
   }
   
   return item;
+}
+
+/**
+ * Query items from a DynamoDB table using a key condition expression.
+ * Useful for tables with composite keys or GSI queries.
+ */
+export async function queryItems(
+  tableName: string,
+  keyConditionExpression: string,
+  expressionAttributeValues: Record<string, any>,
+  dynamo: DynamoDBDocumentClient,
+  options?: {
+    indexName?: string;
+    expressionAttributeNames?: Record<string, string>;
+    scanIndexForward?: boolean;
+    limit?: number;
+  }
+): Promise<any[]> {
+  if (!tableName) {
+    throw new Error("Table name is required");
+  }
+
+  try {
+    const result = await dynamo.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: keyConditionExpression,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ...(options?.indexName && { IndexName: options.indexName }),
+      ...(options?.expressionAttributeNames && { ExpressionAttributeNames: options.expressionAttributeNames }),
+      ...(options?.scanIndexForward !== undefined && { ScanIndexForward: options.scanIndexForward }),
+      ...(options?.limit && { Limit: options.limit }),
+    }));
+
+    return result.Items || [];
+  } catch (error) {
+    console.error("Error querying items from DynamoDB:", error);
+    throw new Error("Failed to query items from database");
+  }
 }
