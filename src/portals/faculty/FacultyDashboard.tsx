@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Title, Text, SimpleGrid, Paper, Stack, Center, Box, Group,
+  Title, Text, SimpleGrid, Paper, Stack, Box, Group,
   ThemeIcon, Skeleton,
 } from '@mantine/core';
 import {

@@ -333,7 +333,6 @@ function StudentDetailView({
   onSessionClick: (sessionId: string) => void;
 }) {
   const initial = studentId.charAt(0).toUpperCase();
-  const completedSessions = sessions.filter((s) => s.status === 'completed');
   const avgScore = analytics?.averageScore;
   const sColor = avgScore != null ? scoreToColor(avgScore) : 'gray';
 

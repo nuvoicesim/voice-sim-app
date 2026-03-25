@@ -80,6 +80,6 @@ export async function apiDelete<T = any>(path: string): Promise<T> {
       headers: getAuthHeaders(),
     },
   });
-  const response = await restOperation.response;
-  return (await response.body.json()) as T;
+  await restOperation.response;
+  return { success: true } as T;
 }
