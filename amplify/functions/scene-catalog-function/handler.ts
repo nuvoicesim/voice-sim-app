@@ -85,7 +85,7 @@ async function handleListScenes() {
 
 async function handleCreateScene(body: string | null) {
   const payload = parseJsonBody(body);
-  const { scenarioKey, title, description, difficulty, tags } = payload;
+  const { scenarioKey, title, description, difficulty, tags, unityBuildFolder } = payload;
 
   if (!scenarioKey || !title) {
     return badRequestResponse("Missing required fields: scenarioKey, title");
@@ -99,6 +99,7 @@ async function handleCreateScene(body: string | null) {
     description: description || "",
     difficulty: difficulty || "medium",
     tags: tags || [],
+    unityBuildFolder: unityBuildFolder || "",
     isActive: true,
     createdAt: now,
     updatedAt: now,

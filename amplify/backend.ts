@@ -381,6 +381,11 @@ cognitoUserPath.addMethod("POST", cognitoUserLambdaIntegration, {
   authorizationType: AuthorizationType.NONE,
 });
 
+const cognitoUserResolvePath = cognitoUserPath.addResource("resolve");
+cognitoUserResolvePath.addMethod("POST", cognitoUserLambdaIntegration, {
+  authorizationType: AuthorizationType.NONE,
+});
+
 // create a new resource path with no authorization for auth
 const authPath = myRestApi.root.addResource("auth");
 authPath.addResource("login").addMethod("POST", authLambdaIntegration, {

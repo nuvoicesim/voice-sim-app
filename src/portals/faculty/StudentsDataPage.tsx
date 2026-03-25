@@ -8,11 +8,12 @@ import {
 import {
   IconUsers, IconInbox, IconSearch, IconChevronRight, IconArrowLeft,
   IconUser, IconCalendar, IconCircleCheck, IconActivity, IconHash,
-  IconClock, IconTrophy, IconStarFilled,
+  IconClock, IconTrophy, IconStarFilled, IconMail,
 } from '@tabler/icons-react';
 import { assignmentApi } from '../../api/assignmentApi';
 import { sessionApi } from '../../api/sessionApi';
 import { analyticsApi } from '../../api/analyticsApi';
+import { cognitoUserApi } from '../../api/cognitoUserApi';
 
 interface SessionRecord {
   sessionId: string;
@@ -28,6 +29,7 @@ interface SessionRecord {
 
 interface StudentSummary {
   studentUserId: string;
+  studentEmail?: string;
   totalAttempts: number;
   completedAttempts: number;
   latestDate: string;
@@ -93,7 +95,8 @@ function StudentCard({
   student: StudentSummary;
   onClick: () => void;
 }) {
-  const initial = student.studentUserId.charAt(0).toUpperCase();
+  const email = student.studentEmail;
+  const initial = (email || student.studentUserId).charAt(0).toUpperCase();
   const rate = student.totalAttempts > 0
     ? Math.round((student.completedAttempts / student.totalAttempts) * 100)
     : 0;
@@ -133,8 +136,13 @@ function StudentCard({
             <Text fw={700} size="sm" c="white">{initial}</Text>
           </Box>
           <Box style={{ flex: 1, minWidth: 0 }}>
-            <Text fw={600} size="sm" lineClamp={1}>{student.studentUserId}</Text>
-            <Group gap="lg" mt={2}>
+            <Group gap={4}>
+              <IconMail size={13} style={{ color: 'var(--mantine-color-blue-5)' }} />
+              <Text fw={600} size="sm" lineClamp={1}>
+                {email || student.studentUserId}
+              </Text>
+            </Group>
+            <Group gap="lg" mt={4}>
               <Group gap={4}>
                 <IconActivity size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
                 <Text size="xs" c="dimmed">{student.totalAttempts} attempts</Text>
@@ -319,6 +327,7 @@ function StatCard({
 
 function StudentDetailView({
   studentId,
+  studentEmail,
   sessions,
   analytics,
   analyticsLoading,
@@ -326,13 +335,15 @@ function StudentDetailView({
   onSessionClick,
 }: {
   studentId: string;
+  studentEmail?: string;
   sessions: SessionRecord[];
   analytics: StudentAnalytics | null;
   analyticsLoading: boolean;
   onBack: () => void;
   onSessionClick: (sessionId: string) => void;
 }) {
-  const initial = studentId.charAt(0).toUpperCase();
+  const displayLabel = studentEmail || studentId;
+  const initial = displayLabel.charAt(0).toUpperCase();
   const avgScore = analytics?.averageScore;
   const sColor = avgScore != null ? scoreToColor(avgScore) : 'gray';
 
@@ -363,7 +374,7 @@ function StudentDetailView({
             <Text fw={700} size="md" c="white">{initial}</Text>
           </Box>
           <Box>
-            <Title order={3} fw={700}>{studentId}</Title>
+            <Title order={3} fw={700}>{displayLabel}</Title>
             <Text size="sm" c="dimmed">
               {sessions.length} session{sessions.length !== 1 ? 's' : ''} for this assignment
             </Text>
@@ -524,9 +535,10 @@ export default function StudentsDataPage() {
   const [studentAnalytics, setStudentAnalytics] = useState<StudentAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
+  const [emailMap, setEmailMap] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
 
-  // Load assignments on mount
+  // Load assignments and user email map on mount
   useEffect(() => {
     assignmentApi.list().then((data) => {
       const list = data.assignments || [];
@@ -537,6 +549,16 @@ export default function StudentsDataPage() {
         status: a.status,
       })));
     }).catch(console.error).finally(() => setAssignmentsLoading(false));
+
+    cognitoUserApi.list().then((res) => {
+      const map: Record<string, string> = {};
+      for (const u of res.users) {
+        const sub = u.attributes?.sub;
+        const email = u.attributes?.email;
+        if (sub && email) map[sub] = email;
+      }
+      setEmailMap(map);
+    }).catch((e) => console.error("Failed to load user emails:", e));
   }, []);
 
   // Load sessions when assignment changes
@@ -575,18 +597,22 @@ export default function StudentsDataPage() {
     }
     return Array.from(map.entries()).map(([userId, userSessions]) => ({
       studentUserId: userId,
+      studentEmail: emailMap[userId],
       totalAttempts: userSessions.length,
       completedAttempts: userSessions.filter((s) => s.status === 'completed').length,
       latestDate: userSessions.reduce((latest, s) =>
         s.startedAt > latest ? s.startedAt : latest, userSessions[0].startedAt),
       sessions: userSessions,
     })).sort((a, b) => (b.latestDate > a.latestDate ? 1 : -1));
-  }, [sessions]);
+  }, [sessions, emailMap]);
 
   const filteredStudents = useMemo(() => {
     if (!search.trim()) return students;
     const q = search.toLowerCase();
-    return students.filter((s) => s.studentUserId.toLowerCase().includes(q));
+    return students.filter((s) =>
+      s.studentUserId.toLowerCase().includes(q) ||
+      (s.studentEmail?.toLowerCase().includes(q) ?? false)
+    );
   }, [students, search]);
 
   const uniqueStudents = students.length;
@@ -597,6 +623,7 @@ export default function StudentsDataPage() {
   // Level 2: student detail view
   if (selectedStudentId) {
     const studentSessions = sessions.filter((s) => s.studentUserId === selectedStudentId);
+    const selectedStudent = students.find((s) => s.studentUserId === selectedStudentId);
     return (
       <Stack gap="xl">
         <Box>
@@ -609,6 +636,7 @@ export default function StudentsDataPage() {
         </Box>
         <StudentDetailView
           studentId={selectedStudentId}
+          studentEmail={selectedStudent?.studentEmail}
           sessions={studentSessions}
           analytics={studentAnalytics}
           analyticsLoading={analyticsLoading}
@@ -722,7 +750,7 @@ export default function StudentsDataPage() {
           {/* Search */}
           {students.length > 0 && (
             <TextInput
-              placeholder="Search by student ID..."
+              placeholder="Search by name or email..."
               leftSection={<IconSearch size={16} />}
               value={search}
               onChange={(e) => setSearch(e.currentTarget.value)}

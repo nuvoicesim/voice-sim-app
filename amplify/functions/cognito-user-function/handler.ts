@@ -47,7 +47,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     if (method === "GET") {
       return await handleGetUser(queryParams);
     }
-    
+
+    // POST /cognito-user/resolve — batch resolve userIds to emails
+    if (method === "POST" && event.resource?.includes("/resolve")) {
+      return await handleBatchResolve(event.body);
+    }
+
     if (method === "POST") {
       return await handleCreateUser(event.body);
     }
@@ -340,5 +345,52 @@ async function handleListUsers(queryParams: Record<string, string>) {
   } catch (error) {
     console.error("Error listing users:", error);
     return serverErrorResponse("Failed to list users");
+  }
+}
+
+/**
+ * Batch resolve Cognito user IDs (sub UUIDs) to emails.
+ * Accepts { userIds: string[] }, returns { users: { userId, email }[] }
+ *
+ * user.username from Amplify SDK returns the Cognito `sub` (UUID),
+ * so we must use ListUsersCommand with a `sub` filter rather than
+ * AdminGetUserCommand (which requires the Cognito Username).
+ */
+async function handleBatchResolve(body: string | null) {
+  try {
+    const payload = parseJsonBody(body);
+    const userIds: string[] = payload.userIds;
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return badRequestResponse("Missing or empty 'userIds' array");
+    }
+
+    const capped = userIds.slice(0, 50);
+
+    const results = await Promise.allSettled(
+      capped.map(async (uid) => {
+        const res = await cognitoClient.send(
+          new ListUsersCommand({
+            UserPoolId: USER_POOL_ID,
+            Filter: `sub = "${uid}"`,
+            Limit: 1,
+          })
+        );
+        const user = res.Users?.[0];
+        const email = user?.Attributes?.find((a) => a.Name === "email")?.Value;
+        return { userId: uid, email: email || null };
+      })
+    );
+
+    const users = results
+      .filter((r): r is PromiseFulfilledResult<{ userId: string; email: string | null }> =>
+        r.status === "fulfilled"
+      )
+      .map((r) => r.value);
+
+    return createResponse(HTTP_STATUS.OK, { users });
+  } catch (error) {
+    console.error("Error batch resolving users:", error);
+    return serverErrorResponse("Failed to resolve users");
   }
 }
