@@ -12,7 +12,8 @@ frontend:
       commands:
         - curl -sL https://github.com/git-lfs/git-lfs/releases/download/v3.7.1/git-lfs-linux-amd64-v3.7.1.tar.gz -o /tmp/git-lfs.tar.gz
         - mkdir -p /tmp/git-lfs && tar xzf /tmp/git-lfs.tar.gz -C /tmp/git-lfs
-        - /tmp/git-lfs/git-lfs-3.7.1/install.sh
+        - export PATH="/tmp/git-lfs/git-lfs-3.7.1:$PATH"
+        - git lfs install
         - git lfs pull
         - npm ci --cache .npm --prefer-offline
     build:
