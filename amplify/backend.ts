@@ -195,7 +195,7 @@ backend.downloadUrlFunction.resources.lambda.addToRolePolicy(
 );
 
 // Configure LLM functions environment variables
-const defaultLlmAllowedOrigins = "http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173";
+const defaultLlmAllowedOrigins = "http://localhost:3000,http://localhost:4173,http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,https://www.voice-sim.org,https://voice-sim.org";
 const llmEnvShared = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "",
   LLM_ALLOWED_ORIGINS: process.env.LLM_ALLOWED_ORIGINS ?? defaultLlmAllowedOrigins,
