@@ -1,98 +1,151 @@
-# Nurse Town - Nursing Simulation Training Platform
+# VOICE - Speech-Language Pathology Simulation Platform
 
-A comprehensive nursing simulation training platform built with React, TypeScript, and AWS Amplify Gen 2. This platform provides interactive simulation experiences for nursing students with progress tracking, surveys, and comprehensive feedback systems.
+A clinical simulation training platform for Speech-Language Pathology (SLP) students. Students interact with AI-powered 3D virtual patients in Unity WebGL, receive real-time dialogue responses via OpenAI, and get automated rubric-based scoring after each session. Faculty can create scenes and assignments, while admins manage users and view platform-wide analytics.
 
-## 🚀 Features
+## Features
 
-- **Multi-Level Simulations**: Three progressive simulation levels with increasing complexity
-- **User Authentication**: Secure user management with AWS Cognito
-- **Progress Tracking**: Comprehensive step-by-step progress monitoring
-- **Survey System**: Pre and post-simulation surveys with detailed feedback
-- **Chat History**: Complete simulation interaction logging
-- **Admin Panel**: User management and response monitoring
-- **Responsive Design**: Modern UI built with Mantine components
+- **AI Virtual Patient Dialogue**: OpenAI-powered patient responses with emotion and motion animation codes for Unity 3D characters
+- **Text-to-Speech**: ElevenLabs TTS with character-level alignment for lip-sync in Unity
+- **Automated Scoring**: 8-criteria rubric-based evaluation of student clinical performance
+- **Role-Based Portals**: Separate dashboards and workflows for students, faculty, and admins
+- **Assignment System**: Faculty create assignments linked to scenes with configurable attempt policies and modes (practice / assessment)
+- **Session Lifecycle**: Full session tracking with conversation turns, evaluation persistence, and history
+- **Survey System**: Configurable post-session survey templates with analytics
+- **Unity 3D Simulation**: WebGL-embedded 3D patient simulation with microphone input
+- **User Management**: AWS Cognito-based authentication with role management
 
-## 🏗️ Architecture
+## Architecture
 
 - **Frontend**: React 18 + TypeScript + Vite + Mantine UI
-- **Backend**: AWS Amplify Gen 2 + Lambda + DynamoDB + Cognito
+- **3D Simulation**: Unity WebGL (embedded via iframe)
+- **Backend**: AWS Amplify Gen 2 + API Gateway REST + Lambda
+- **AI Services**: OpenAI (dialogue + scoring), ElevenLabs (TTS)
 - **State Management**: Redux Toolkit
 - **Authentication**: AWS Cognito User Pool
 - **Database**: Amazon DynamoDB
-- **API**: REST API with Lambda functions
+- **Storage**: Amazon S3 (Unity desktop client downloads)
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-nurse-town/
-├── amplify/                          # Backend infrastructure
-│   ├── auth/                        # Authentication configuration
-│   │   └── resource.ts             # Cognito User Pool setup
-│   ├── data/                        # Data models
-│   │   └── resource.ts             # DynamoDB table definitions
-│   ├── functions/                   # Lambda functions (manually created)
-│   │   ├── simulation-data-function/  # Simulation data management
-│   │   │   ├── handler.ts          # Lambda function logic
-│   │   │   ├── resource.ts         # Function resource definition
-│   │   │   └── package.json        # Function dependencies
-│   │   ├── debrief-function/       # Simulation debrief handling
-│   │   ├── pre-survey-function/    # Pre-simulation surveys
-│   │   ├── post-survey-function/   # Post-simulation surveys
-│   │   ├── cognito-user-function/  # User management
-│   │   └── shared/                 # Shared utilities and types
-│   │       ├── database.ts         # DynamoDB operations
-│   │       ├── http.ts             # HTTP response helpers
-│   │       ├── index.ts            # Shared exports
-│   │       └── utils.ts            # Utility functions
-│   ├── backend.ts                  # Main backend configuration
-│   └── package.json                # Backend dependencies
-├── src/                             # Frontend React application
-│   ├── AdminControl/               # Admin panel components
-│   ├── MainApp/                    # Main application components
-│   │   ├── SideBar/               # Navigation sidebar
-│   │   └── StepContents/          # Step-by-step content
-│   │       ├── InformedConsent/   # Consent forms
-│   │       ├── Level1Simulation/  # First simulation level
-│   │       ├── Level2Simulation/  # Second simulation level
-│   │       ├── Level3Simulation/  # Third simulation level
-│   │       ├── PreSurvey/         # Pre-simulation surveys
-│   │       ├── PostSurvey/        # Post-simulation surveys
-│   │       └── SimulationTutorial/# Tutorial content
-│   ├── shared/                     # Shared components and utilities
-│   ├── App.tsx                     # Main application component
-│   ├── main.tsx                    # Application entry point
-│   ├── reducer.tsx                 # Redux state management
-│   └── store.ts                    # Redux store configuration
-├── package.json                     # Frontend dependencies
-├── vite.config.ts                   # Vite build configuration
-└── tsconfig.json                    # TypeScript configuration
+voice-sim-app/
+├── amplify/                              # Backend infrastructure
+│   ├── backend.ts                       # Main backend config, API Gateway routes, permissions
+│   ├── auth/
+│   │   └── resource.ts                  # Cognito User Pool setup
+│   ├── data/
+│   │   └── resource.ts                  # DynamoDB table definitions
+│   └── functions/
+│       ├── shared/                      # Shared Lambda utilities
+│       │   ├── index.ts                 # Centralized exports
+│       │   ├── http.ts                  # HTTP response helpers, CORS
+│       │   ├── database.ts              # DynamoDB operations (getItem, putItem, queryItems)
+│       │   ├── auth-middleware.ts        # Role-based auth (x-user-id, x-user-role headers)
+│       │   ├── context-resolver.ts      # Assignment → Scene → scenarioKey resolution
+│       │   ├── cors.ts                  # CORS header builder
+│       │   ├── openai.ts               # OpenAI API client wrapper
+│       │   └── utils.ts                 # ID generation, timestamps
+│       ├── auth-function/               # Cognito login / signout
+│       ├── cognito-user-function/       # User CRUD, role updates, batch resolve
+│       ├── scene-catalog-function/      # Scene CRUD (faculty/admin)
+│       ├── assignment-function/         # Assignment CRUD + status management
+│       ├── session-function/            # Session lifecycle (start, complete, list)
+│       ├── llm-dialogue-function/       # OpenAI patient dialogue generation
+│       │   ├── handler.ts
+│       │   ├── promptStrings.ts         # Compiled prompt templates
+│       │   └── prompts/                 # Raw prompt text files per scenario
+│       ├── llm-scoring-function/        # OpenAI rubric-based scoring
+│       │   ├── handler.ts
+│       │   ├── promptStrings.ts
+│       │   └── prompts/
+│       ├── tts-function/                # ElevenLabs text-to-speech
+│       │   ├── handler.ts
+│       │   ├── validation.ts            # Request validation
+│       │   ├── voicePolicy.ts           # Voice selection policy per scenario
+│       │   └── providers/elevenlabs.ts  # ElevenLabs API client
+│       ├── survey-template-function/    # Survey templates + student responses
+│       ├── analytics-function/          # Student, cohort, platform, survey analytics
+│       ├── download-url-function/       # S3 presigned URL for desktop client
+│       ├── simulation-data-function/    # [Legacy] Simulation data storage
+│       ├── pre-survey-function/         # [Legacy] Pre-survey
+│       ├── post-survey-function/        # [Legacy] Post-survey
+│       └── debrief-function/            # [Legacy] Debrief
+│
+├── src/                                  # Frontend React application
+│   ├── main.tsx                         # Entry point, Amplify config, Authenticator
+│   ├── App.tsx                          # Route definitions, role-based navigation
+│   ├── TopBar.tsx                       # Brand header, role badge, sign out
+│   ├── store.ts                         # Redux store configuration
+│   ├── api/                             # REST API client modules
+│   │   ├── apiClient.ts                 # Base Amplify REST client with auth headers
+│   │   ├── assignmentApi.ts
+│   │   ├── sessionApi.ts
+│   │   ├── sceneCatalogApi.ts
+│   │   ├── cognitoUserApi.ts
+│   │   └── analyticsApi.ts
+│   ├── components/                      # Shared UI components
+│   │   ├── PortalLayout.tsx             # Sidebar + content layout per role
+│   │   └── RoleGuard.tsx                # Route-level role access control
+│   ├── slices/                          # Redux Toolkit slices
+│   │   ├── authSlice.ts
+│   │   ├── assignmentSlice.ts
+│   │   └── sessionSlice.ts
+│   └── portals/                         # Role-based page components
+│       ├── student/
+│       │   ├── StudentDashboard.tsx      # Stats, deadlines, recent sessions
+│       │   ├── AssignmentsPage.tsx       # Browse and launch assignments
+│       │   ├── SessionRunner.tsx         # Unity iframe (mic + autoplay)
+│       │   ├── SessionDetailPage.tsx     # Score ring, transcript, evaluation
+│       │   └── HistoryPage.tsx           # Past session history
+│       ├── faculty/
+│       │   ├── FacultyDashboard.tsx      # Cohort analytics overview
+│       │   ├── SceneManagement.tsx       # Scene CRUD
+│       │   ├── CreateAssignment.tsx      # Assignment creation form
+│       │   ├── AssignmentManagement.tsx  # Assignment list + status control
+│       │   ├── StudentsDataPage.tsx      # Per-student drill-down
+│       │   └── AnalysisPage.tsx          # Completion funnels, survey charts
+│       └── admin/
+│           ├── AdminDashboard.tsx        # Platform-wide metrics
+│           ├── UsersRolesPage.tsx        # User listing + role management
+│           └── GlobalAnalyticsPage.tsx   # Aggregate analytics
+│
+├── public/
+│   └── unity/                           # Unity WebGL builds
+│       └── broca-aphasia-webgl/         # Default simulation build
+│
+├── scripts/
+│   ├── prompts-to-ts.mjs               # Compiles .txt prompts → promptStrings.ts
+│   └── seed-scene-catalog.ts           # Seeds initial scene catalog data
+│
+├── docs/
+│   └── design_doc.md
+├── API_HANDBOOK.md                      # Full API reference documentation
+├── package.json
+├── vite.config.ts
+└── tsconfig.json
 ```
 
-## 🛠️ Prerequisites
+## Prerequisites
 
-Before you begin, ensure you have the following installed:
-
-- **Node.js** (v18 or higher)
-- **npm** 
+- **Node.js** v18 or higher
+- **npm**
 - **Git**
 - **AWS CLI** (optional, for production deployment)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/harrryzhang1250/nurse-town
-cd nurse-town
+git clone <repository-url>
+cd voice-sim-app
 ```
 
 ### 2. Install Dependencies
 
 ```bash
-# Install frontend dependencies
 npm install
 
-# Install backend dependencies
 cd amplify
 npm install
 cd ..
@@ -100,313 +153,166 @@ cd ..
 
 ### 3. Start Local Development Environment
 
-#### Start Amplify Sandbox (Backend)
+Start Amplify Sandbox (backend) in one terminal:
 
 ```bash
-cd amplify
 npx ampx sandbox
 ```
 
-This will start the local development environment with:
-- Local DynamoDB tables
-- Local Lambda functions
-- Local API Gateway
-- Local Cognito User Pool
-
-#### Start Frontend Development Server
+Start the frontend dev server in another terminal:
 
 ```bash
-# In a new terminal, from the root directory
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`
+The frontend will be available at `http://localhost:5173`.
 
-## 🔧 Environment Configuration
+## User Roles and Portals
 
-### Backend Configuration
+### Student Portal (`/student/*`)
 
-The backend configuration is handled automatically by Amplify Sandbox. Key configurations are in:
+| Route | Page | Description |
+|-------|------|-------------|
+| `/student/dashboard` | StudentDashboard | Stats, upcoming deadlines, recent sessions, quick actions |
+| `/student/assignments` | AssignmentsPage | Browse published assignments, filter by mode, launch simulation |
+| `/student/session/:id` | SessionRunner | Unity 3D iframe with mic + autoplay permissions |
+| `/student/session/:id/detail` | SessionDetailPage | Score ring, performance level, conversation transcript |
+| `/student/history` | HistoryPage | All past simulation sessions |
 
-- `amplify/backend.ts` - Main backend setup
-- `amplify/data/resource.ts` - Database schema
-- `amplify/auth/resource.ts` - Authentication setup
+### Faculty Portal (`/faculty/*`)
 
-## 🎯 Development Workflow
+| Route | Page | Description |
+|-------|------|-------------|
+| `/faculty/dashboard` | FacultyDashboard | Cohort analytics (sessions, completion rate, students) |
+| `/faculty/scenes` | SceneManagement | Create/edit clinical simulation scenes |
+| `/faculty/assignments/new` | CreateAssignment | Create assignment with scene, mode, attempts, due date |
+| `/faculty/assignments` | AssignmentManagement | List assignments, publish/archive/draft status control |
+| `/faculty/students` | StudentsDataPage | Per-student session and analytics drill-down |
+| `/faculty/analysis` | AnalysisPage | Completion funnels, survey participation charts |
 
-### 1. Backend Development
+### Admin Portal (`/admin/*`)
 
-#### Adding New Lambda Functions
+| Route | Page | Description |
+|-------|------|-------------|
+| `/admin/dashboard` | AdminDashboard | Platform-wide metrics |
+| `/admin/users` | UsersRolesPage | List Cognito users, search, change roles |
+| `/admin/analytics` | GlobalAnalyticsPage | Aggregate platform + survey analytics |
 
-Lambda functions are created manually in this project:
+Admins can also switch to the Faculty portal via the top bar.
 
-1. **Create Function Folder Structure**
-   ```bash
-   cd amplify/functions
-   mkdir my-new-function
-   cd my-new-function
-   ```
+## Database Schema
 
-2. **Create Function Files**
-   - `handler.ts` - Main Lambda function logic
-   - `resource.ts` - Function resource definition
-   - `package.json` - Function dependencies
+### Assignment-Centric Tables
 
-3. **Add to Backend Configuration**
-   Edit `amplify/backend.ts`:
-   ```typescript
-   import { myNewFunction } from "./functions/my-new-function/resource";
-   
-   const backend = defineBackend({
-     auth,
-     data,
-     // ... other resources
-     myNewFunction, // Add your new function
-   });
-   ```
+| Table | Partition Key | Sort Key | Description |
+|-------|---------------|----------|-------------|
+| SceneCatalog | `sceneId` | — | Clinical simulation scene definitions |
+| Assignment | `assignmentId` | — | Assignments linking scenes to student activities |
+| AssignmentEnrollment | `assignmentId` | `studentUserId` | Per-student enrollment and delivery status |
+| SimulationSession | `sessionId` | — | Individual simulation attempt records |
+| SessionTurn | `sessionId` | `turnIndex` | Conversation turns within a session |
+| SessionEvaluation | `sessionId` | — | AI-generated scoring results |
+| SurveyTemplate | `surveyTemplateId` | — | Configurable survey question templates |
+| AssignmentSurveyResponse | `assignmentId` | `responseKey` | Student survey submissions |
 
-4. **Configure Table Permissions**
-   ```typescript
-   // Grant table permissions
-   const tableMap = [
-     // ... existing tables
-     backend.data.resources.tables["YourTableName"],
-   ];
-   
-   // Assign permissions
-   tableMap[tableIndex].grantReadWriteData(backend.myNewFunction.resources.lambda);
-   ```
+### Legacy Tables
 
-5. **Set Environment Variables**
-   ```typescript
-   // Add table name environment variable
-   backend.myNewFunction.addEnvironment("TABLE_NAME", tableMap[tableIndex].tableName);
-   ```
+| Table | Partition Key | Sort Key | Description |
+|-------|---------------|----------|-------------|
+| PreSurveyAnswers | `userID` | — | Pre-simulation survey responses |
+| PostSurveyAnswers | `userID` | — | Post-simulation survey responses |
+| SimulationData | `userID` | `simulationLevel` | Simulation chat history |
+| DebriefAnswers | `userID` | `simulationLevel` | Debrief responses |
 
-6. **Restart Sandbox**
-   ```bash
-   npx ampx sandbox restart
-   ```
+## API Documentation
 
-#### Modifying Database Schema
+Full API reference is available in [API_HANDBOOK.md](API_HANDBOOK.md), covering:
 
-Edit `amplify/data/resource.ts` and restart the sandbox:
+- **Auth**: Login, signout
+- **User Management**: Create, list, search, role updates, batch resolve
+- **Scene Catalog**: CRUD for simulation scenes
+- **Assignments**: CRUD with status lifecycle (draft → published → archived)
+- **Sessions**: Start, complete, list, get detail (with turns + evaluation)
+- **LLM Dialogue**: OpenAI patient response generation with emotion/motion codes
+- **LLM Scoring**: 8-criteria rubric evaluation with auto-persistence
+- **TTS**: ElevenLabs text-to-speech with alignment data
+- **Surveys**: Template management and student response submission
+- **Analytics**: Student, cohort, platform, and survey aggregations
+- **Download**: Presigned S3 URLs for Unity desktop client
+
+## Authentication
+
+The platform uses AWS Cognito for authentication:
+
+- **Login**: Email/password authentication via Cognito `USER_PASSWORD_AUTH` flow
+- **Role Management**: Custom attribute `custom:role` (`student` | `faculty` | `admin`)
+- **API Authorization**: Auth headers (`x-user-id`, `x-user-role`) set by the frontend after login
+- **Admin User Creation**: Admin-controlled user registration with auto-generated credentials
+
+## Development Guide
+
+### Adding a New Lambda Function
+
+1. Create a new directory under `amplify/functions/` with `handler.ts` and `resource.ts`
+2. Import and register the function in `amplify/backend.ts`
+3. Grant DynamoDB table permissions
+4. Set environment variables
+5. Add API Gateway routes if needed
+6. Restart sandbox: `npx ampx sandbox`
+
+### Shared Utilities
+
+All Lambda functions share utilities from `amplify/functions/shared/`:
+
+| Module | Purpose |
+|--------|---------|
+| `http.ts` | `createResponse`, `badRequestResponse`, `notFoundResponse`, `serverErrorResponse`, etc. |
+| `database.ts` | `createDynamoDbClient`, `getItem`, `putItem`, `queryItems` |
+| `auth-middleware.ts` | `extractCallerIdentity`, `requireRole` |
+| `context-resolver.ts` | `resolveScenarioKey` — resolves Assignment → Scene → `scenarioKey` |
+| `openai.ts` | `callOpenAIChat` — OpenAI API wrapper with retry and timeout |
+| `cors.ts` | `buildCorsHeaders` — dynamic CORS header builder |
+| `utils.ts` | `generateId`, `generateTimestamp` |
+
+### Prompt Management
+
+LLM prompt text files live under each function's `prompts/` directory, organized by scenario (`task1`, `task2`, `task3`). To update prompts:
+
+1. Edit the `.txt` files under `amplify/functions/llm-dialogue-function/prompts/` or `llm-scoring-function/prompts/`
+2. Run the compiler script: `node scripts/prompts-to-ts.mjs`
+3. This regenerates `promptStrings.ts` which is imported by the handler
+
+## Troubleshooting
+
+### Sandbox Not Starting
 
 ```bash
+npx ampx sandbox status
 npx ampx sandbox restart
 ```
 
-#### Testing API Endpoints
-
-Use the sandbox console to test your APIs:
+### Frontend Build Issues
 
 ```bash
-npx ampx sandbox console
-```
-
-### 2. Lambda Function Development Guide
-
-#### Function Structure
-
-Each Lambda function follows this structure:
-
-```
-my-function/
-├── handler.ts          # Main function logic
-├── resource.ts         # Function resource definition
-└── package.json        # Function dependencies
-```
-
-#### Example Function Files
-
-**`handler.ts`** - Main function logic:
-```typescript
-import type { APIGatewayProxyHandler } from "aws-lambda";
-import { 
-  createResponse, 
-  optionsResponse, 
-  badRequestResponse,
-  // ... other imports
-} from "../shared";
-
-export const handler: APIGatewayProxyHandler = async (event) => {
-  // Function implementation
-};
-```
-
-**`resource.ts`** - Function resource definition:
-```typescript
-import { defineFunction } from "@aws-amplify/backend";
-
-export const myFunction = defineFunction({
-  name: "my-function",
-  entry: "./handler.ts",
-});
-```
-
-**`package.json`** - Function dependencies:
-```json
-{
-  "type": "module",
-  "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.0.0",
-    "@aws-sdk/lib-dynamodb": "^3.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
-  }
-}
-```
-
-#### Shared Utilities
-
-Use the shared utilities in `amplify/functions/shared/`:
-
-- **`database.ts`** - DynamoDB operations (getItem, putItem, etc.)
-- **`http.ts`** - HTTP response helpers (createResponse, badRequestResponse, etc.)
-- **`utils.ts`** - Common utility functions
-- **`index.ts`** - Centralized exports
-
-#### Function Integration Steps
-
-1. **Import in backend.ts**
-2. **Add to backend definition**
-3. **Configure permissions**
-4. **Set environment variables**
-5. **Add to API Gateway (if needed)**
-6. **Restart sandbox**
-
-### 3. Frontend Development
-
-#### Adding New Components
-
-Create new components in the appropriate directory under `src/` and import them where needed.
-
-#### State Management
-
-Use Redux Toolkit for global state management. Add new slices in `src/reducer.tsx`.
-
-#### API Integration
-
-Use the shared `simulationClient.ts` for API calls or create new client functions as needed.
-
-## 🗄️ Database Schema
-
-### Tables
-
-- **PreSurveyAnswers**: Pre-simulation survey responses
-- **PostSurveyAnswers**: Post-simulation survey responses  
-- **SimulationData**: Simulation interaction logs
-- **DebriefAnswers**: Simulation debrief responses
-
-### Key Fields
-
-All tables include:
-- `userID`: User identifier
-- `createdAt`: Record creation timestamp
-- `updatedAt`: Record update timestamp
-- Additional fields are automatically handled and stored
-
-## 🔐 Authentication
-
-The platform uses AWS Cognito for user authentication:
-
-- **User Registration**: Admin-controlled user creation
-- **User Login**: Email/password authentication
-- **Session Management**: Automatic token refresh
-- **Authorization**: Role-based access control
-
-## 📚 API Documentation
-
-### Endpoints
-
-- **POST** `/simulation-data` - Save simulation data
-- **GET** `/simulation-data` - Retrieve simulation data
-- **POST** `/debrief` - Submit debrief responses
-- **GET** `/debrief` - Get debrief data
-- **POST** `/pre-survey` - Submit pre-simulation survey
-- **GET** `/pre-survey` - Get pre-simulation survey
-- **POST** `/post-survey` - Submit post-simulation survey
-- **GET** `/post-survey` - Get post-simulation survey
-- **POST** `/cognito-user` - Create new user
-- **GET** `/cognito-user` - Get user information
-
-### Request/Response Format
-
-All endpoints support additional fields that are automatically stored:
-
-```json
-{
-  "userID": "user123",
-  "simulationLevel": 1,
-  "simulationData": {...},
-  "sessionNotes": "User performed well",  // Additional field
-  "difficulty": "medium"                  // Additional field
-}
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Sandbox Not Starting
-
-```bash
-# Check if ports are available
-lsof -i :3000
-lsof -i :5173
-
-# Restart sandbox
-cd amplify
-npx ampx sandbox restart
-```
-
-#### Frontend Build Issues
-
-```bash
-# Clear node_modules and reinstall
 rm -rf node_modules package-lock.json
 npm install
 ```
 
-#### Database Connection Issues
+### Environment Variables
 
-```bash
-# Check sandbox status
-cd amplify
-npx ampx sandbox status
+Key environment variables configured in `amplify/backend.ts`:
 
-# Restart sandbox
-npx ampx sandbox restart
-```
+| Variable | Function(s) | Description |
+|----------|-------------|-------------|
+| `OPENAI_API_KEY` | llm-dialogue, llm-scoring | OpenAI API key |
+| `ELEVENLABS_API_KEY` | tts | ElevenLabs API key |
+| `USER_POOL_ID` | auth, cognito-user | Cognito User Pool ID |
+| `CLIENT_ID` | auth | Cognito app client ID |
+| `S3_BUCKET_NAME` | download-url | Unity client download bucket |
 
-## 🤝 Contributing
+## References
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-For support and questions:
-
-- Check the [Amplify Documentation](https://docs.amplify.aws/)
-- Review the [Amplify Gen 2 Guide](https://docs.amplify.aws/gen2/)
-- Open an issue in this repository
-
-## 🔄 Updates
-
-This project uses:
-- **Amplify Gen 2** for the latest backend features
-- **React 18** with modern hooks and features
-- **TypeScript** for type safety
-- **Mantine UI** for consistent design components
-
----
+- [AWS Amplify Gen 2 Documentation](https://docs.amplify.aws/gen2/)
+- [Mantine UI](https://mantine.dev/)
+- [OpenAI API](https://platform.openai.com/docs/)
+- [ElevenLabs API](https://elevenlabs.io/docs/)
