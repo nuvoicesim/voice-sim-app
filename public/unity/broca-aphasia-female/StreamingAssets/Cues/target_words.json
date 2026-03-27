@@ -1,0 +1,134 @@
+{
+  "scripts": [
+    {
+      "script_number": 1,
+      "title": "Morning Routine",
+      "target_word": "Coffee",
+      "alternate_target": "",
+      "semanticKeywords": [ "beverage", "hot", "drink", "iced", "cold", "drank", "bitter" ],
+      "phonemicKeywords": [ "cof", "caw", "cfe", "kuh" ],
+      "studentHints": {
+        "Semantic": "It is a drink people often have in the morning.",
+        "Phonemic": "It starts with 'C' like 'cat'.",
+        "Model": "Say 'Coffee'."
+      }
+    },
+    {
+      "script_number": 2,
+      "title": "Family Members",
+      "target_word": "Daughter",
+      "alternate_target": "",
+      "semanticKeywords": [ "female child", "my child", "family member" ],
+      "phonemicKeywords": [ "dau", "daw", "dag" ],
+      "studentHints": {
+        "Semantic": "It is a female child in a family.",
+        "Phonemic": "It starts with 'D' like 'dog'.",
+        "Model": "Say 'Daughter'."
+      }
+    },
+    {
+      "script_number": 3,
+      "title": "Daily Activities",
+      "target_word": "Shower",
+      "alternate_target": "",
+      "semanticKeywords": [ "wash body", "bath", "cleaning up", "hygiene" ],
+      "phonemicKeywords": [ "sho", "shau", "shw" ],
+      "studentHints": {
+        "Semantic": "It is an activity where you clean your body.",
+        "Phonemic": "It starts with 'Sh' like 'shoe'.",
+        "Model": "Say 'Shower'."
+      }
+    },
+    {
+      "script_number": 4,
+      "title": "Meals",
+      "target_word": "Sandwich",
+      "alternate_target": "",
+      "semanticKeywords": [ "meat", "lunch food", "bread" ],
+      "phonemicKeywords": [ "san", "saw", "sand" ],
+      "studentHints": {
+        "Semantic": "It is something you eat for lunch made with bread.",
+        "Phonemic": "It starts with 'S' like 'sand'.",
+        "Model": "Say 'Sandwich'."
+      }
+    },
+    {
+      "script_number": 5,
+      "title": "Transportation",
+      "target_word": "Car",
+      "alternate_target": "",
+      "semanticKeywords": [ "vehicle", "drive", "automobile", "ride" ],
+      "phonemicKeywords": [ "ca", "car", "kar" ],
+      "studentHints": {
+        "Semantic": "It is a vehicle you drive on the road.",
+        "Phonemic": "It starts with 'C' like 'cat'.",
+        "Model": "Say 'Car'."
+      }
+    },
+    {
+      "script_number": 6,
+      "title": "Clothing",
+      "target_word": "Shirt",
+      "alternate_target": "",
+      "semanticKeywords": [ "clothing", "clothes", "top" ],
+      "phonemicKeywords": [ "shi", "sh", "sht" ],
+      "studentHints": {
+        "Semantic": "It is what you wear on your upper body.",
+        "Phonemic": "It starts with 'Sh' like 'shoe'.",
+        "Model": "Say 'Shirt'."
+      }
+    },
+    {
+      "script_number": 7,
+      "title": "Weather",
+      "target_word": "Sunny",
+      "alternate_target": "",
+      "semanticKeywords": [ "bright day", "no clouds", "sun is out" ],
+      "phonemicKeywords": [ "sun", "sunn", "suny" ],
+      "studentHints": {
+        "Semantic": "It is a bright day with lots of sunlight.",
+        "Phonemic": "It starts with 'S' like 'sun'.",
+        "Model": "Say 'Sunny'."
+      }
+    },
+    {
+      "script_number": 8,
+      "title": "Household Items",
+      "target_word": "Television",
+      "alternate_target": "TV",
+      "semanticKeywords": [ "watch shows", "screen", "entertainment device" ],
+      "phonemicKeywords": [ "tel", "tele", "tv" ],
+      "studentHints": {
+        "Semantic": "It is the device you watch shows on.",
+        "Phonemic": "It starts with 'T' like 'table'.",
+        "Model": "Say 'Television'."
+      }
+    },
+    {
+      "script_number": 9,
+      "title": "Health/Medical",
+      "target_word": "Pill",
+      "alternate_target": "Pills",
+      "semanticKeywords": [ "medicine", "tablet", "medication" ],
+      "phonemicKeywords": [ "pil", "pill", "p" ],
+      "studentHints": {
+        "Semantic": "It is a small medicine you take to feel better.",
+        "Phonemic": "It starts with 'P' like 'pen'.",
+        "Model": "Say 'Pill'."
+      }
+    },
+    {
+      "script_number": 10,
+      "title": "Emotions/Feelings",
+      "target_word": "Tired",
+      "alternate_target": "",
+      "semanticKeywords": [ "sleepy", "fatigued", "need rest" ],
+      "phonemicKeywords": [ "tir", "tie", "tird" ],
+      "studentHints": {
+        "Semantic": "It is how you feel after a long day.",
+        "Phonemic": "It starts with 'T' like 'top'.",
+        "Model": "Say 'Tired'."
+      }
+    }
+  ]
+}

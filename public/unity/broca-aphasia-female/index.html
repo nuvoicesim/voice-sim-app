@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Unity Web Player | V.O.I.C.E</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <div id="unity-container" class="unity-desktop">
+      <canvas id="unity-canvas" width="1280" height="720" tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"> </div>
+      <div id="unity-footer">
+        <div id="unity-logo-title-footer"></div>
+        <div id="unity-fullscreen-button"></div>
+        <div id="unity-build-title">V.O.I.C.E</div>
+      </div>
+    </div>
+
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var unityInstanceGlobal = null;
+      var knownBridgeName = null;
+
+      const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
+
+      function resolveVoiceSimLogLevel() {
+        const params = new URLSearchParams(window.location.search);
+        const fromQuery = (params.get('voicesimLog') || '').toLowerCase();
+        if (LOG_LEVELS[fromQuery]) {
+          localStorage.setItem('voicesim.logLevel', fromQuery);
+          return fromQuery;
+        }
+
+        const fromStorage = (localStorage.getItem('voicesim.logLevel') || '').toLowerCase();
+        if (LOG_LEVELS[fromStorage]) {
+          return fromStorage;
+        }
+
+        return 'warn';
+      }
+
+      const activeVoiceSimLogLevel = resolveVoiceSimLogLevel();
+
+      function voiceLog(level, ...args) {
+        if (!LOG_LEVELS[level] || LOG_LEVELS[level] < LOG_LEVELS[activeVoiceSimLogLevel]) {
+          return;
+        }
+        const fn = (level === 'error') ? console.error : (level === 'warn' ? console.warn : console.log);
+        fn('[VoiceSim]', ...args);
+      }
+
+      function unityShowBanner(msg, type) {
+        var warningBanner = document.querySelector("#unity-warning");
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+        }
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function() {
+            warningBanner.removeChild(div);
+            updateBannerVisibility();
+          }, 5000);
+        }
+        updateBannerVisibility();
+      }
+
+      // Keep in sync with Player Settings → WebGL default canvas size
+      var webglDefaultWidth = 1280;
+      var webglDefaultHeight = 720;
+
+      function fitDesktopCanvasToWindow() {
+        var footer = document.querySelector("#unity-footer");
+        var margin = 16;
+        var footerH = footer ? footer.offsetHeight : 48;
+        var maxW = window.innerWidth - margin;
+        var maxH = window.innerHeight - footerH - margin;
+        if (maxW <= 0 || maxH <= 0) return;
+        var aspect = webglDefaultWidth / webglDefaultHeight;
+        var w = Math.min(webglDefaultWidth, maxW);
+        var h = w / aspect;
+        if (h > maxH) {
+          h = maxH;
+          w = h * aspect;
+        }
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/broca-aphasia-female.loader.js";
+      var config = {
+        dataUrl: buildUrl + "/broca-aphasia-female.data",
+        frameworkUrl: buildUrl + "/broca-aphasia-female.framework.js",
+        codeUrl: buildUrl + "/broca-aphasia-female.wasm",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "Northeastern Unitversity",
+        productName: "V.O.I.C.E",
+        productVersion: "1.0",
+        showBanner: unityShowBanner,
+      };
+
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        var meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+        document.getElementsByTagName('head')[0].appendChild(meta);
+        document.querySelector("#unity-container").className = "unity-mobile";
+        canvas.className = "unity-mobile";
+      } else {
+        fitDesktopCanvasToWindow();
+        window.addEventListener("resize", fitDesktopCanvasToWindow);
+      }
+
+      document.querySelector("#unity-loading-bar").style.display = "block";
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, (progress) => {
+          document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+        }).then((unityInstance) => {
+          unityInstanceGlobal = unityInstance;
+          document.querySelector("#unity-loading-bar").style.display = "none";
+          if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+            fitDesktopCanvasToWindow();
+          }
+          document.querySelector("#unity-fullscreen-button").onclick = () => {
+            unityInstance.SetFullscreen(1);
+          };
+
+          initializeVoiceRecognition();
+        }).catch((message) => {
+          voiceLog('error', 'Unity load failed:', message);
+          alert(message);
+        });
+      };
+      document.body.appendChild(script);
+
+      // ============================================
+      // Console-only Web Speech API implementation
+      // Hold R to start recording, release R to stop and send transcript.
+      // ============================================
+      let recognition = null;
+      let isRecognitionActive = false;
+      let finalTranscript = '';
+      let interimTranscript = '';
+      let isRKeyPressed = false;
+      let lastInterimLogAt = 0;
+      const interimLogThrottleMs = 800;
+
+      function initializeVoiceRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        if (!SpeechRecognition) {
+          voiceLog('error', 'Web Speech API not supported. Use Chrome/Edge/Safari.');
+          return;
+        }
+
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+          isRecognitionActive = true;
+          voiceLog('info', 'Recording started. Hold R to keep recording, release R to send.');
+          notifyUnityStatus('Recording started');
+        };
+
+        recognition.onresult = (event) => {
+          interimTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript + ' ';
+              voiceLog('info', 'Final segment:', transcript);
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          const now = Date.now();
+          if (interimTranscript && now - lastInterimLogAt >= interimLogThrottleMs) {
+            voiceLog('debug', 'Interim:', interimTranscript);
+            lastInterimLogAt = now;
+          }
+        };
+
+        recognition.onend = () => {
+          isRecognitionActive = false;
+          const text = finalTranscript.trim();
+          if (text) {
+            sendToUnity(text);
+          } else {
+            voiceLog('debug', 'Recording ended with no transcript.');
+          }
+        };
+
+        recognition.onerror = (event) => {
+          isRecognitionActive = false;
+          voiceLog('error', 'Speech recognition error:', event.error);
+          notifyUnityStatus('Error: ' + event.error);
+        };
+
+        voiceLog('info', 'Voice recognition initialized. Use keyboard: hold R to record, release R to send.');
+      }
+
+      function startRecording() {
+        if (!recognition) {
+          voiceLog('error', 'Recognition is not initialized.');
+          return;
+        }
+        if (isRecognitionActive) {
+          voiceLog('warn', 'Recognition is already active.');
+          return;
+        }
+
+        finalTranscript = '';
+        interimTranscript = '';
+
+        try {
+          recognition.start();
+        } catch (error) {
+          voiceLog('error', 'Failed to start recording:', error);
+        }
+      }
+
+      function stopRecording() {
+        if (!recognition || !isRecognitionActive) {
+          return;
+        }
+
+        try {
+          recognition.stop();
+          voiceLog('info', 'Stopping recording...');
+        } catch (error) {
+          voiceLog('error', 'Failed to stop recording:', error);
+        }
+      }
+
+      function notifyUnityStatus(status) {
+        if (!unityInstanceGlobal) {
+          return;
+        }
+        try {
+          unityInstanceGlobal.SendMessage('WebGLGlobalBridge', 'UpdateVoiceStatus', status);
+        } catch (error) {
+          voiceLog('debug', 'Could not send status to Unity:', error.message);
+        }
+      }
+
+      function sendToUnity(text) {
+        if (!unityInstanceGlobal) {
+          voiceLog('error', 'Unity instance is not available.');
+          return;
+        }
+
+        const possibleNames = [
+          'WebGLGlobalBridge',
+          'WebGLTextBridge',
+          'Humano_Aphasia'
+        ];
+
+        if (knownBridgeName) {
+          try {
+            unityInstanceGlobal.SendMessage(knownBridgeName, 'InjectText', text);
+            voiceLog('info', 'Sent transcript via', knownBridgeName + ':', text);
+            return;
+          } catch (error) {
+            voiceLog('warn', 'Known bridge failed, rediscovering:', knownBridgeName, error.message);
+            knownBridgeName = null;
+          }
+        }
+
+        let sent = false;
+        for (const name of possibleNames) {
+          try {
+            unityInstanceGlobal.SendMessage(name, 'InjectText', text);
+            knownBridgeName = name;
+            voiceLog('info', 'Sent transcript via', name + ':', text);
+            sent = true;
+            break;
+          } catch (error) {
+            voiceLog('debug', 'SendMessage failed for', name + ':', error.message);
+          }
+        }
+
+        if (!sent) {
+          voiceLog('error', 'Failed to send transcript to Unity.');
+        }
+      }
+
+      document.addEventListener('keydown', (e) => {
+        if ((e.key === 'r' || e.key === 'R') && !isRKeyPressed) {
+          isRKeyPressed = true;
+          startRecording();
+        }
+      });
+
+      document.addEventListener('keyup', (e) => {
+        if (e.key === 'r' || e.key === 'R') {
+          isRKeyPressed = false;
+          stopRecording();
+        }
+      });
+    </script>
+  </body>
+</html>
