@@ -88,20 +88,26 @@ async function handleListScenes() {
 
 async function handleCreateScene(body: string | null) {
   const payload = parseJsonBody(body);
-  const { scenarioKey, title, description, difficulty, tags, unityBuildId, unityBuildFolder } = payload;
+  const { scenarioKey, title, description, difficulty, tags, unityBuildId } = payload;
 
   if (!scenarioKey || !title) {
     return badRequestResponse("Missing required fields: scenarioKey, title");
   }
 
-  if (unityBuildId && UNITY_BUILD_TABLE_NAME) {
-    const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId }, dynamo);
-    if (!unityBuild) {
-      return badRequestResponse("unityBuildId does not reference an existing Unity build");
-    }
-    if (unityBuild.status !== "published") {
-      return badRequestResponse("Scenes can only link published Unity builds");
-    }
+  if (typeof unityBuildId !== "string" || unityBuildId.trim() === "") {
+    return badRequestResponse("Scenes must reference a published Unity build");
+  }
+
+  if (!UNITY_BUILD_TABLE_NAME) {
+    return serverErrorResponse("Unity build configuration is missing");
+  }
+
+  const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId: unityBuildId.trim() }, dynamo);
+  if (!unityBuild) {
+    return badRequestResponse("unityBuildId does not reference an existing Unity build");
+  }
+  if (unityBuild.status !== "published") {
+    return badRequestResponse("Scenes can only link published Unity builds");
   }
 
   const now = generateTimestamp();
@@ -112,8 +118,8 @@ async function handleCreateScene(body: string | null) {
     description: description || "",
     difficulty: difficulty || "medium",
     tags: tags || [],
-    unityBuildId: unityBuildId || null,
-    unityBuildFolder: unityBuildFolder || "",
+    unityBuildId: unityBuildId.trim(),
+    unityBuildFolder: "",
     isActive: true,
     createdAt: now,
     updatedAt: now,
@@ -128,18 +134,36 @@ async function handleUpdateScene(sceneId: string, body: string | null) {
   if (!existing) return notFoundResponse("Scene not found");
 
   const payload = parseJsonBody(body);
-  if (payload.unityBuildId && UNITY_BUILD_TABLE_NAME) {
-    const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId: payload.unityBuildId }, dynamo);
-    if (!unityBuild) {
-      return badRequestResponse("unityBuildId does not reference an existing Unity build");
-    }
-    if (unityBuild.status !== "published") {
-      return badRequestResponse("Scenes can only link published Unity builds");
-    }
+  const nextUnityBuildId =
+    typeof payload.unityBuildId === "string" && payload.unityBuildId.trim() !== ""
+      ? payload.unityBuildId.trim()
+      : typeof existing.unityBuildId === "string" && existing.unityBuildId.trim() !== ""
+        ? existing.unityBuildId.trim()
+        : "";
+
+  if (!nextUnityBuildId) {
+    return badRequestResponse("Scenes must reference a published Unity build");
   }
+
+  if (!UNITY_BUILD_TABLE_NAME) {
+    return serverErrorResponse("Unity build configuration is missing");
+  }
+
+  const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId: nextUnityBuildId }, dynamo);
+  if (!unityBuild) {
+    return badRequestResponse("unityBuildId does not reference an existing Unity build");
+  }
+  if (unityBuild.status !== "published") {
+    return badRequestResponse("Scenes can only link published Unity builds");
+  }
+
+  delete payload.unityBuildFolder;
+
   const updated = {
     ...existing,
     ...payload,
+    unityBuildId: nextUnityBuildId,
+    unityBuildFolder: "",
     sceneId,
     updatedAt: generateTimestamp(),
   };

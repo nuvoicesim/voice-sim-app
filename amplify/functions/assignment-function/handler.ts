@@ -20,6 +20,7 @@ import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 
 const TABLE_NAME = process.env.TABLE_NAME;
 const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
+const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -29,6 +30,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   if (method === "OPTIONS") return optionsResponse();
 
   try {
+    // DELETE /assignments/{assignmentId}
+    if (method === "DELETE" && pathParams?.assignmentId) {
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["faculty", "admin"]);
+      if (authError) return authError;
+      return await handleDeleteAssignment(pathParams.assignmentId);
+    }
+
     // PUT /assignments/{assignmentId}/status
     if (method === "PUT" && pathParams?.assignmentId && event.resource?.includes("/status")) {
       const caller = await extractCallerIdentity(event);
@@ -70,7 +79,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleCreateAssignment(caller!.userId, event.body);
     }
 
-    return methodNotAllowedResponse(["GET", "POST", "PUT", "OPTIONS"]);
+    return methodNotAllowedResponse(["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
   } catch (error) {
     console.error("Unhandled error:", error);
     return serverErrorResponse("Internal server error");
@@ -104,6 +113,16 @@ async function handleCreateAssignment(createdBy: string, body: string | null) {
     const patientProfile = await getItem(PATIENT_PROFILE_TABLE_NAME, { patientProfileId }, dynamo);
     if (!patientProfile) {
       return badRequestResponse("patientProfileId does not reference an existing patient profile");
+    }
+  }
+
+  if (SCENE_CATALOG_TABLE_NAME) {
+    const scene = await getItem(SCENE_CATALOG_TABLE_NAME, { sceneId }, dynamo);
+    if (!scene) {
+      return badRequestResponse("sceneId does not reference an existing scene");
+    }
+    if (typeof scene.unityBuildId !== "string" || scene.unityBuildId.trim() === "") {
+      return badRequestResponse("Assignments require scenes with a published Unity build");
     }
   }
 
@@ -191,6 +210,23 @@ async function handleUpdateAssignment(assignmentId: string, body: string | null)
     }
   }
 
+  const nextSceneId =
+    typeof payload.sceneId === "string" && payload.sceneId.trim() !== ""
+      ? payload.sceneId.trim()
+      : typeof existing.sceneId === "string"
+        ? existing.sceneId
+        : "";
+
+  if (SCENE_CATALOG_TABLE_NAME) {
+    const scene = await getItem(SCENE_CATALOG_TABLE_NAME, { sceneId: nextSceneId }, dynamo);
+    if (!scene) {
+      return badRequestResponse("sceneId does not reference an existing scene");
+    }
+    if (typeof scene.unityBuildId !== "string" || scene.unityBuildId.trim() === "") {
+      return badRequestResponse("Assignments require scenes with a published Unity build");
+    }
+  }
+
   const updated = {
     ...existing,
     ...payload,
@@ -220,4 +256,21 @@ async function handleUpdateStatus(assignmentId: string, body: string | null) {
 
   await putItem(TABLE_NAME, updated, dynamo);
   return createResponse(HTTP_STATUS.OK, updated);
+}
+
+async function handleDeleteAssignment(assignmentId: string) {
+  const existing = await getItem(TABLE_NAME, { assignmentId }, dynamo);
+  if (!existing) return notFoundResponse("Assignment not found");
+
+  const updated = {
+    ...existing,
+    status: "archived",
+    updatedAt: generateTimestamp(),
+  };
+
+  await putItem(TABLE_NAME, updated, dynamo);
+  return createResponse(HTTP_STATUS.OK, {
+    message: "Assignment archived",
+    assignmentId,
+  });
 }

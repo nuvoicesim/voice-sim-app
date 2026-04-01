@@ -137,9 +137,11 @@ backend.unityBuildFunction.addEnvironment("TABLE_NAME", unityBuildTable.tableNam
 assignmentTable.grantReadWriteData(backend.assignmentFunction.resources.lambda);
 enrollmentTable.grantReadWriteData(backend.assignmentFunction.resources.lambda);
 patientProfileTable.grantReadData(backend.assignmentFunction.resources.lambda);
+sceneCatalogTable.grantReadData(backend.assignmentFunction.resources.lambda);
 backend.assignmentFunction.addEnvironment("TABLE_NAME", assignmentTable.tableName);
 backend.assignmentFunction.addEnvironment("ENROLLMENT_TABLE_NAME", enrollmentTable.tableName);
 backend.assignmentFunction.addEnvironment("PATIENT_PROFILE_TABLE_NAME", patientProfileTable.tableName);
+backend.assignmentFunction.addEnvironment("SCENE_CATALOG_TABLE_NAME", sceneCatalogTable.tableName);
 
 // Session function — needs access to sessions, assignments, enrollments, turns, evaluations
 sessionTable.grantReadWriteData(backend.sessionFunction.resources.lambda);

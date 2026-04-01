@@ -56,6 +56,12 @@ interface SessionView extends SessionRecord {
   unityBuildFolder?: string | null;
 }
 
+interface AssignmentLaunchConfig {
+  sceneId: string;
+  unityBuildId: string;
+  unityLaunchUrl: string;
+}
+
 interface SessionTurnRecord {
   sessionId: string;
   turnIndex: number;
@@ -230,6 +236,10 @@ async function handleIssueRuntimeToken(
 
   if (!(await isStudentLaunchableAssignment(session.assignmentId))) {
     return notFoundResponse("Session not found");
+  }
+
+  if (!(await resolveAssignmentLaunchConfig(session.assignmentId))) {
+    return conflictResponse("Session requires a published Unity build before runtime can start");
   }
 
   const client = resolveRequestedClient(body);
@@ -408,6 +418,10 @@ async function startOrResumeSession(
   if (!assignment) return notFoundResponse("Assignment not found");
   if (assignment.status !== "published") {
     return badRequestResponse("Assignment is not published");
+  }
+
+  if (!(await resolveAssignmentLaunchConfig(assignmentId))) {
+    return conflictResponse("Assignment requires a published Unity build before students can launch sessions");
   }
 
   // Count existing attempts by this student for this assignment
@@ -607,35 +621,57 @@ async function findSessionsByAssignmentAndStudent(
     .filter((item): item is SessionRecord => item !== null);
 }
 
+async function resolveAssignmentLaunchConfig(
+  assignmentId: string
+): Promise<AssignmentLaunchConfig | null> {
+  if (!ASSIGNMENT_TABLE || !SCENE_CATALOG_TABLE || !UNITY_BUILD_TABLE) {
+    return null;
+  }
+
+  const assignment = await getItem(ASSIGNMENT_TABLE, { assignmentId }, dynamo);
+  if (!assignment?.sceneId || typeof assignment.sceneId !== "string") {
+    return null;
+  }
+
+  const scene = await getItem(SCENE_CATALOG_TABLE, { sceneId: assignment.sceneId }, dynamo);
+  if (!scene?.unityBuildId || typeof scene.unityBuildId !== "string" || scene.unityBuildId.trim() === "") {
+    return null;
+  }
+
+  const unityBuild = await getItem(UNITY_BUILD_TABLE, { unityBuildId: scene.unityBuildId }, dynamo);
+  const unityLaunchUrl =
+    typeof unityBuild?.launchUrl === "string" && unityBuild.launchUrl.trim() !== ""
+      ? unityBuild.launchUrl.trim()
+      : null;
+
+  if (!unityBuild || unityBuild.status !== "published" || !unityLaunchUrl) {
+    return null;
+  }
+
+  return {
+    sceneId: assignment.sceneId,
+    unityBuildId: scene.unityBuildId.trim(),
+    unityLaunchUrl,
+  };
+}
+
 async function enrichSessionForLaunch(session: SessionRecord): Promise<SessionView> {
   if (!ASSIGNMENT_TABLE || !SCENE_CATALOG_TABLE) {
     return session;
   }
 
   try {
-    const assignment = await getItem(ASSIGNMENT_TABLE, { assignmentId: session.assignmentId }, dynamo);
-    if (!assignment?.sceneId) {
+    const launchConfig = await resolveAssignmentLaunchConfig(session.assignmentId);
+    if (!launchConfig) {
       return session;
     }
 
-    const scene = await getItem(SCENE_CATALOG_TABLE, { sceneId: assignment.sceneId }, dynamo);
-    const unityBuild =
-      scene?.unityBuildId && UNITY_BUILD_TABLE
-        ? await getItem(UNITY_BUILD_TABLE, { unityBuildId: scene.unityBuildId }, dynamo)
-        : null;
-
     return {
       ...session,
-      sceneId: assignment.sceneId,
-      unityBuildId: typeof scene?.unityBuildId === "string" ? scene.unityBuildId : null,
-      unityLaunchUrl:
-        typeof unityBuild?.launchUrl === "string" && unityBuild.launchUrl.trim() !== ""
-          ? unityBuild.launchUrl
-          : null,
-      unityBuildFolder:
-        typeof scene?.unityBuildFolder === "string" && scene.unityBuildFolder.trim() !== ""
-          ? scene.unityBuildFolder
-          : null,
+      sceneId: launchConfig.sceneId,
+      unityBuildId: launchConfig.unityBuildId,
+      unityLaunchUrl: launchConfig.unityLaunchUrl,
+      unityBuildFolder: null,
     };
   } catch (error) {
     console.warn("Failed to enrich session with launch metadata:", error);
