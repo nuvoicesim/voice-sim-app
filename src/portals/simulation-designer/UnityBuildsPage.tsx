@@ -117,8 +117,14 @@ export default function UnityBuildsPage() {
     setSelectedFile(null);
   };
 
-  const uploadFileToS3 = async (uploadUrl: string, file: File, contentType: string) => {
+  const uploadFileToS3 = async (
+    uploadUrl: string,
+    file: File,
+    contentType: string,
+    bucketName?: string | null
+  ) => {
     let uploadHost = '';
+    const currentOrigin = window.location.origin;
     try {
       const parsedUploadUrl = new URL(uploadUrl);
       uploadHost = parsedUploadUrl.host;
@@ -145,9 +151,10 @@ export default function UnityBuildsPage() {
       });
     } catch (error) {
       if (error instanceof TypeError) {
-        const hostMessage = uploadHost ? ` (${uploadHost})` : '';
+        const bucketMessage = bucketName ? ` Bucket: ${bucketName}.` : '';
+        const hostMessage = uploadHost ? ` Host: ${uploadHost}.` : '';
         throw new Error(
-          `Browser upload to S3 was blocked before the file was sent${hostMessage}. Verify the generated bucket name and make sure the S3 bucket CORS policy allows http://localhost:5173 for PUT and OPTIONS with the Content-Type header.`
+          `Browser upload to S3 was blocked before the file was sent.${bucketMessage}${hostMessage} Make sure the S3 bucket CORS policy allows ${currentOrigin} for PUT preflight (OPTIONS) requests with the Content-Type header.`
         );
       }
       throw error;
@@ -175,7 +182,12 @@ export default function UnityBuildsPage() {
         entryHtml,
       });
 
-      await uploadFileToS3(uploadResponse.uploadUrl, selectedFile, uploadResponse.uploadHeaders['Content-Type']);
+      await uploadFileToS3(
+        uploadResponse.uploadUrl,
+        selectedFile,
+        uploadResponse.uploadHeaders['Content-Type'],
+        uploadResponse.uploadBucketName
+      );
       await unityBuildApi.publish(uploadResponse.unityBuild.unityBuildId);
       setModalOpen(false);
       resetCreateForm();
@@ -209,7 +221,12 @@ export default function UnityBuildsPage() {
         contentType: file.type || 'application/zip',
       });
 
-      await uploadFileToS3(uploadResponse.uploadUrl, file, uploadResponse.uploadHeaders['Content-Type']);
+      await uploadFileToS3(
+        uploadResponse.uploadUrl,
+        file,
+        uploadResponse.uploadHeaders['Content-Type'],
+        uploadResponse.uploadBucketName
+      );
       await unityBuildApi.publish(unityBuildId);
       await loadBuilds();
     } catch (err) {

@@ -54,11 +54,12 @@ const backend = defineBackend({
 const storageStack = backend.createStack("unity-storage-stack");
 const unityUploadAllowedOrigins = (
   process.env.UNITY_BUILD_UPLOAD_ALLOWED_ORIGINS ??
-  "http://localhost:3000,http://localhost:4173,http://localhost:5173,http://127.0.0.1:8000,http://localhost:8000,https://www.voice-sim.org,https://voice-sim.org"
+  "https://www.voice-sim.org,https://voice-sim.org,https://sandbox.d1yrflacecv45f.amplifyapp.com"
 )
   .split(",")
   .map((origin) => origin.trim())
   .filter((origin) => origin.length > 0);
+const unityUploadAllowedHeaders = ["Content-Type"];
 
 const unityStorageBucket = new Bucket(storageStack, "UnityStorageBucket", {
   blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -69,7 +70,7 @@ const unityStorageBucket = new Bucket(storageStack, "UnityStorageBucket", {
     {
       allowedOrigins: unityUploadAllowedOrigins,
       allowedMethods: [HttpMethods.GET, HttpMethods.HEAD, HttpMethods.PUT],
-      allowedHeaders: ["*"],
+      allowedHeaders: unityUploadAllowedHeaders,
       exposedHeaders: ["ETag"],
       maxAge: 300,
     },

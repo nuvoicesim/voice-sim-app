@@ -231,6 +231,7 @@ function buildUploadResponse(record: UnityBuildRecord, uploadUrl: string) {
   return createResponse(HTTP_STATUS.OK, {
     unityBuild: record,
     uploadUrl,
+    uploadBucketName: S3_BUCKET_NAME ?? null,
     uploadMethod: "PUT",
     uploadHeaders: {
       "Content-Type": "application/zip",

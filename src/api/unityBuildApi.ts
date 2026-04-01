@@ -19,6 +19,7 @@ export interface UnityBuild {
 export interface UnityBuildUploadUrlResponse {
   unityBuild: UnityBuild;
   uploadUrl: string;
+  uploadBucketName?: string | null;
   uploadMethod: "PUT";
   uploadHeaders: {
     "Content-Type": string;
