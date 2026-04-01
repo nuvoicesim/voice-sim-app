@@ -14,6 +14,7 @@ import {
   createDynamoDbClient,
   getItem,
   putItem,
+  updateItem,
   generateId,
   generateTimestamp,
   queryItems,
@@ -67,6 +68,8 @@ interface SessionTurnRecord {
   turnIndex: number;
   userText: string;
   modelText: string;
+  userSpeechStartAt?: string;
+  patientSpeechStartAt?: string;
   emotionCode: number;
   motionCode: number;
   latencyMs: number;
@@ -170,6 +173,24 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           });
         }
         return await handleCompleteSession(pathParams.sessionId, runtimeClaims.sub);
+      } catch (error) {
+        if (error instanceof RuntimeTokenError) {
+          return createResponse(error.statusCode, { error: error.message });
+        }
+        throw error;
+      }
+    }
+
+    // PUT /sessions/{sessionId}/turns/{turnIndex}
+    if (method === "PUT" && pathParams?.sessionId && pathParams?.turnIndex && resource.includes("/turns/")) {
+      try {
+        const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+        if (runtimeClaims.sessionId !== pathParams.sessionId) {
+          return createResponse(HTTP_STATUS.CONFLICT, {
+            error: "sessionId does not match runtime token",
+          });
+        }
+        return await handleUpdateTurn(pathParams.sessionId, pathParams.turnIndex, runtimeClaims.sub, event.body);
       } catch (error) {
         if (error instanceof RuntimeTokenError) {
           return createResponse(error.statusCode, { error: error.message });
@@ -518,6 +539,82 @@ async function handleGetSession(
     session: await enrichSessionForLaunch(session),
     turns,
     evaluation,
+  });
+}
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
+}
+
+async function handleUpdateTurn(
+  sessionId: string,
+  turnIndexParam: string,
+  studentUserId: string,
+  body: string | null
+) {
+  const session = await getItem(SESSION_TABLE, { sessionId }, dynamo);
+  if (!session) return notFoundResponse("Session not found");
+
+  if (session.studentUserId !== studentUserId) {
+    return createResponse(HTTP_STATUS.FORBIDDEN, { error: "Cannot update another student's session turn" });
+  }
+
+  if (!TURN_TABLE) {
+    return serverErrorResponse("Session turns are not configured");
+  }
+
+  const turnIndex = Number(turnIndexParam);
+  if (!Number.isInteger(turnIndex) || turnIndex < 1) {
+    return badRequestResponse("turnIndex must be a positive integer");
+  }
+
+  const payload = parseJsonBody(body);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return badRequestResponse("Request body must be a JSON object");
+  }
+  const updates: Record<string, string> = {};
+
+  if ("userSpeechStartAt" in payload) {
+    const userSpeechStartAt = normalizeIsoTimestamp(payload.userSpeechStartAt);
+    if (!userSpeechStartAt) {
+      return badRequestResponse("userSpeechStartAt must be a valid ISO timestamp");
+    }
+    updates.userSpeechStartAt = userSpeechStartAt;
+  }
+
+  if ("patientSpeechStartAt" in payload) {
+    const patientSpeechStartAt = normalizeIsoTimestamp(payload.patientSpeechStartAt);
+    if (!patientSpeechStartAt) {
+      return badRequestResponse("patientSpeechStartAt must be a valid ISO timestamp");
+    }
+    updates.patientSpeechStartAt = patientSpeechStartAt;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return badRequestResponse("Provide userSpeechStartAt and/or patientSpeechStartAt");
+  }
+
+  const turn = await getItem(TURN_TABLE, { sessionId, turnIndex }, dynamo);
+  if (!turn) {
+    return notFoundResponse("Session turn not found");
+  }
+
+  await updateItem(TURN_TABLE, { sessionId, turnIndex }, updates, dynamo);
+
+  return createResponse(HTTP_STATUS.OK, {
+    turn: {
+      ...turn,
+      ...updates,
+    },
   });
 }
 

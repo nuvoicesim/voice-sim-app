@@ -45,6 +45,8 @@ interface DialogueRequestBody {
     sessionId?: string;
     turnIndex?: number;
     client?: string;
+    userSpeechStartAt?: string;
+    patientSpeechStartAt?: string;
   };
 }
 
@@ -67,6 +69,8 @@ interface ValidatedDialogueRequest {
     sessionId?: string;
     turnIndex?: number;
     client?: string;
+    userSpeechStartAt?: string;
+    patientSpeechStartAt?: string;
   };
 }
 
@@ -222,6 +226,19 @@ function asFiniteNumber(value: unknown): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
+function normalizeOptionalTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed.toISOString();
+}
+
 function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogueRequest; error?: string } {
   if (!payload || typeof payload !== "object") {
     return { error: "Request body must be a JSON object" };
@@ -268,6 +285,16 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
 
   const options = body.options && typeof body.options === "object" ? body.options : {};
   const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  const userSpeechStartAt = normalizeOptionalTimestamp(metadata.userSpeechStartAt);
+  const patientSpeechStartAt = normalizeOptionalTimestamp(metadata.patientSpeechStartAt);
+
+  if ("userSpeechStartAt" in metadata && !userSpeechStartAt) {
+    return { error: "metadata.userSpeechStartAt must be a valid ISO timestamp" };
+  }
+
+  if ("patientSpeechStartAt" in metadata && !patientSpeechStartAt) {
+    return { error: "metadata.patientSpeechStartAt must be a valid ISO timestamp" };
+  }
 
   return {
     request: {
@@ -283,6 +310,8 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
         sessionId: hasContext ? body.context!.sessionId : (typeof metadata.sessionId === "string" ? metadata.sessionId : undefined),
         turnIndex: typeof metadata.turnIndex === "number" ? metadata.turnIndex : undefined,
         client: typeof metadata.client === "string" ? metadata.client : undefined,
+        userSpeechStartAt,
+        patientSpeechStartAt,
       },
     },
   };
@@ -552,6 +581,42 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   const latencyMs = Date.now() - startedAt;
+  let resolvedTurnIndex = request.metadata.turnIndex;
+
+  if (request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
+    try {
+      if (typeof resolvedTurnIndex !== "number") {
+        const existingTurns = await queryItems(
+          TURN_TABLE_NAME,
+          "sessionId = :sid",
+          { ":sid": request.context.sessionId },
+          dynamo,
+          { scanIndexForward: false, limit: 1 }
+        );
+        resolvedTurnIndex = existingTurns[0]?.turnIndex ? Number(existingTurns[0].turnIndex) + 1 : 1;
+      }
+
+      await putItem(
+        TURN_TABLE_NAME,
+        {
+          sessionId: request.context.sessionId,
+          turnIndex: resolvedTurnIndex,
+          userText: lastUserMessage.content,
+          modelText: parsedResponse.responseText,
+          ...(request.metadata.userSpeechStartAt ? { userSpeechStartAt: request.metadata.userSpeechStartAt } : {}),
+          ...(request.metadata.patientSpeechStartAt ? { patientSpeechStartAt: request.metadata.patientSpeechStartAt } : {}),
+          emotionCode: parsedResponse.emotionCode,
+          motionCode: parsedResponse.motionCode,
+          latencyMs,
+          timestamp: generateTimestamp(),
+        },
+        dynamo
+      );
+    } catch (error) {
+      console.warn("Failed to persist dialogue turn:", error);
+    }
+  }
+
   const responseBody = {
     requestId,
     choices: [
@@ -569,44 +634,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     metadata: {
       promptVersion,
       sessionId: request.metadata.sessionId,
-      turnIndex: request.metadata.turnIndex,
+      turnIndex: resolvedTurnIndex,
       fallbackUsed,
       malformedRetryTriggered,
     },
   };
-
-  if (request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
-    try {
-      let turnIndex = request.metadata.turnIndex;
-      if (typeof turnIndex !== "number") {
-        const existingTurns = await queryItems(
-          TURN_TABLE_NAME,
-          "sessionId = :sid",
-          { ":sid": request.context.sessionId },
-          dynamo,
-          { scanIndexForward: false, limit: 1 }
-        );
-        turnIndex = existingTurns[0]?.turnIndex ? Number(existingTurns[0].turnIndex) + 1 : 1;
-      }
-
-      await putItem(
-        TURN_TABLE_NAME,
-        {
-          sessionId: request.context.sessionId,
-          turnIndex,
-          userText: lastUserMessage.content,
-          modelText: parsedResponse.responseText,
-          emotionCode: parsedResponse.emotionCode,
-          motionCode: parsedResponse.motionCode,
-          latencyMs,
-          timestamp: generateTimestamp(),
-        },
-        dynamo
-      );
-    } catch (error) {
-      console.warn("Failed to persist dialogue turn:", error);
-    }
-  }
 
   console.log("llm-dialogue request completed", {
     requestId,
@@ -617,7 +649,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     promptVersion,
     scenario,
     sessionId: request.metadata.sessionId,
-    turnIndex: request.metadata.turnIndex,
+    turnIndex: resolvedTurnIndex,
     fallbackUsed,
     malformedRetryTriggered,
   });

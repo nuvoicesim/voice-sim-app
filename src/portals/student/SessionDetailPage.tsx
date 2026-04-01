@@ -47,6 +47,14 @@ function formatDateTime(dateStr: string) {
   });
 }
 
+function formatSpeechStartTime(dateStr: string) {
+  return new Date(dateStr).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function formatDuration(start: string, end: string | null): string {
   if (!end) return '—';
   const sec = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000);
@@ -71,6 +79,14 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
               borderBottomRightRadius: 4,
             }}
           >
+            {turn.userSpeechStartAt && (
+              <Group gap={4} mb={6} justify="flex-end" wrap="nowrap">
+                <IconClock size={10} style={{ color: 'rgba(255,255,255,0.82)' }} />
+                <Text size="xs" style={{ color: 'rgba(255,255,255,0.82)' }}>
+                  Started {formatSpeechStartTime(turn.userSpeechStartAt)}
+                </Text>
+              </Group>
+            )}
             <Text size="sm" c="white" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
           </Paper>
           <ThemeIcon size={34} radius="xl" variant="light" color="indigo" style={{ flexShrink: 0 }}>
@@ -94,6 +110,14 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
               borderBottomLeftRadius: 4,
             }}
           >
+            {turn.patientSpeechStartAt && (
+              <Group gap={4} mb={6} wrap="nowrap">
+                <IconClock size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
+                <Text size="xs" c="dimmed">
+                  Started {formatSpeechStartTime(turn.patientSpeechStartAt)}
+                </Text>
+              </Group>
+            )}
             <Text size="sm" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
             {turn.latencyMs > 0 && (
               <Group gap={4} mt={4}>

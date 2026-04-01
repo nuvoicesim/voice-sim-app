@@ -557,6 +557,9 @@ const sessionCompletePath = sessionItemPath.addResource("complete");
 sessionCompletePath.addMethod("PUT", sessionLambdaIntegration, publicMethodOptions);
 const sessionRuntimeTokenPath = sessionItemPath.addResource("runtime-token");
 sessionRuntimeTokenPath.addMethod("POST", sessionLambdaIntegration, cognitoMethodOptions);
+const sessionTurnsPath = sessionItemPath.addResource("turns");
+const sessionTurnItemPath = sessionTurnsPath.addResource("{turnIndex}");
+sessionTurnItemPath.addMethod("PUT", sessionLambdaIntegration, publicMethodOptions);
 
 // /sessions/{sessionId}/survey-response
 const sessionSurveyPath = sessionItemPath.addResource("survey-response");

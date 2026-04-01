@@ -153,6 +153,8 @@ const schema = a.schema({
       turnIndex: a.integer().required(),
       userText: a.string(),
       modelText: a.string(),
+      userSpeechStartAt: a.string(),
+      patientSpeechStartAt: a.string(),
       emotionCode: a.integer(),
       motionCode: a.integer(),
       latencyMs: a.integer(),
