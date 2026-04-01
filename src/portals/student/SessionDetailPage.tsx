@@ -55,6 +55,26 @@ function formatSpeechStartTime(dateStr: string) {
   });
 }
 
+function formatSpeechDuration(durationMs?: number) {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) {
+    return null;
+  }
+  const totalSeconds = durationMs / 1000;
+  if (totalSeconds < 1) {
+    return `${totalSeconds.toFixed(2)}s`;
+  }
+  if (totalSeconds < 10) {
+    return `${totalSeconds.toFixed(1)}s`;
+  }
+  if (totalSeconds < 60) {
+    return `${Math.round(totalSeconds)}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return `${minutes}m ${seconds}s`;
+}
+
 function formatDuration(start: string, end: string | null): string {
   if (!end) return '—';
   const sec = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000);
@@ -65,30 +85,44 @@ function formatDuration(start: string, end: string | null): string {
 }
 
 function ConversationBubble({ turn }: { turn: SessionTurn }) {
+  const studentSpeechStartAt = turn.userSpeechStartAt;
+  const patientSpeechStartAt = turn.patientSpeechStartAt;
+  const studentSpeechDuration = formatSpeechDuration(turn.userSpeechDurationMs);
+  const patientSpeechDuration = formatSpeechDuration(turn.patientSpeechDurationMs);
+
   return (
     <Stack gap="sm">
       {/* User (Therapist) */}
       {turn.userText && (
         <Group justify="flex-end" align="flex-start">
-          <Paper
-            radius="lg"
-            p="sm"
-            style={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              maxWidth: '75%',
-              borderBottomRightRadius: 4,
-            }}
-          >
-            {turn.userSpeechStartAt && (
-              <Group gap={4} mb={6} justify="flex-end" wrap="nowrap">
-                <IconClock size={10} style={{ color: 'rgba(255,255,255,0.82)' }} />
-                <Text size="xs" style={{ color: 'rgba(255,255,255,0.82)' }}>
-                  Started {formatSpeechStartTime(turn.userSpeechStartAt)}
+          <Stack gap={4} align="flex-end" style={{ maxWidth: '75%' }}>
+            {studentSpeechStartAt && (
+              <Group gap={4} justify="flex-end" wrap="nowrap">
+                <IconClock size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
+                <Text size="xs" c="dimmed">
+                  {formatSpeechStartTime(studentSpeechStartAt)}
                 </Text>
               </Group>
             )}
-            <Text size="sm" c="white" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
-          </Paper>
+            <Paper
+              radius="lg"
+              p="sm"
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderBottomRightRadius: 4,
+              }}
+            >
+              <Text size="sm" c="white" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
+              {studentSpeechDuration && (
+                <Group gap={4} mt={4} justify="flex-end" wrap="nowrap">
+                  <IconBolt size={10} style={{ color: 'rgba(255,255,255,0.82)' }} />
+                  <Text size="xs" style={{ color: 'rgba(255,255,255,0.82)' }}>
+                    {studentSpeechDuration}
+                  </Text>
+                </Group>
+              )}
+            </Paper>
+          </Stack>
           <ThemeIcon size={34} radius="xl" variant="light" color="indigo" style={{ flexShrink: 0 }}>
             <IconUser size={16} />
           </ThemeIcon>
@@ -101,31 +135,34 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
           <ThemeIcon size={34} radius="xl" variant="light" color="orange" style={{ flexShrink: 0 }}>
             <IconMoodSmile size={16} />
           </ThemeIcon>
-          <Paper
-            radius="lg"
-            p="sm"
-            style={{
-              background: '#f4f5f7',
-              maxWidth: '75%',
-              borderBottomLeftRadius: 4,
-            }}
-          >
-            {turn.patientSpeechStartAt && (
-              <Group gap={4} mb={6} wrap="nowrap">
+          <Stack gap={4} align="flex-start" style={{ maxWidth: '75%' }}>
+            {patientSpeechStartAt && (
+              <Group gap={4} wrap="nowrap">
                 <IconClock size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
                 <Text size="xs" c="dimmed">
-                  Started {formatSpeechStartTime(turn.patientSpeechStartAt)}
+                  {formatSpeechStartTime(patientSpeechStartAt)}
                 </Text>
               </Group>
             )}
-            <Text size="sm" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
-            {turn.latencyMs > 0 && (
-              <Group gap={4} mt={4}>
-                <IconBolt size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">{(turn.latencyMs / 1000).toFixed(1)}s</Text>
-              </Group>
-            )}
-          </Paper>
+            <Paper
+              radius="lg"
+              p="sm"
+              style={{
+                background: '#f4f5f7',
+                borderBottomLeftRadius: 4,
+              }}
+            >
+              <Text size="sm" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
+              {patientSpeechDuration && (
+                <Group gap={4} mt={4} wrap="nowrap">
+                  <IconBolt size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
+                  <Text size="xs" c="dimmed">
+                    {patientSpeechDuration}
+                  </Text>
+                </Group>
+              )}
+            </Paper>
+          </Stack>
         </Group>
       )}
     </Stack>
@@ -325,17 +362,6 @@ export default function SessionDetailPage() {
                 </Group>
               </Group>
             </Paper>
-            {evaluation && (
-              <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
-                <Group justify="space-between">
-                  <Text size="xs" c="dimmed" fw={500}>Avg Response Time</Text>
-                  <Group gap={4}>
-                    <IconBolt size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                    <Text size="xs" fw={500}>{evaluation.responseTimeAvgSec.toFixed(1)}s</Text>
-                  </Group>
-                </Group>
-              </Paper>
-            )}
           </Stack>
         </Paper>
       </SimpleGrid>

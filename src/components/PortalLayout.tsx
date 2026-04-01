@@ -138,72 +138,82 @@ export default function PortalLayout({ role, children }: PortalLayoutProps) {
   const location = useLocation();
   const items = NAV_ITEMS[role];
   const meta = ROLE_META[role];
+  const isImmersiveSessionRoute = role === 'student' && /^\/student\/session\/[^/]+$/.test(location.pathname);
 
   return (
-    <Box style={{ display: 'flex', minHeight: '100vh' }}>
+    <Box
+      style={{
+        display: 'flex',
+        minHeight: isImmersiveSessionRoute ? 'calc(100dvh - 56px)' : '100dvh',
+        background: isImmersiveSessionRoute ? '#ffffff' : undefined,
+      }}
+    >
       {/* ── Sidebar ── */}
-      <Box
-        style={{
-          width: SIDEBAR_W,
-          background: '#fcfcfd',
-          borderRight: '1px solid #eef0f4',
-          position: 'fixed',
-          top: 56,
-          left: 0,
-          bottom: 0,
-          overflowY: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        {/* Portal label */}
-        <Box style={{ padding: '20px 24px 12px' }}>
-          <Group gap={8}>
-            <Box
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: meta.gradient,
-                flexShrink: 0,
-              }}
-            />
-            <Text
-              size="xs"
-              fw={700}
-              c="dimmed"
-              style={{ textTransform: 'uppercase', letterSpacing: 1.2 }}
-            >
-              {meta.label}
-            </Text>
-          </Group>
+      {!isImmersiveSessionRoute && (
+        <Box
+          style={{
+            width: SIDEBAR_W,
+            background: '#fcfcfd',
+            borderRight: '1px solid #eef0f4',
+            position: 'fixed',
+            top: 56,
+            left: 0,
+            bottom: 0,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* Portal label */}
+          <Box style={{ padding: '20px 24px 12px' }}>
+            <Group gap={8}>
+              <Box
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: meta.gradient,
+                  flexShrink: 0,
+                }}
+              />
+              <Text
+                size="xs"
+                fw={700}
+                c="dimmed"
+                style={{ textTransform: 'uppercase', letterSpacing: 1.2 }}
+              >
+                {meta.label}
+              </Text>
+            </Group>
+          </Box>
+
+          {/* Separator */}
+          <Box style={{ height: 1, background: '#eef0f4', margin: '0 24px 8px' }} />
+
+          {/* Nav items */}
+          <Stack gap={2} style={{ flex: 1, paddingTop: 4, paddingBottom: 20 }}>
+            {items.map((item) => (
+              <SidebarItem
+                key={item.path}
+                item={item}
+                active={location.pathname === item.path}
+                color={meta.color}
+                onClick={() => navigate(item.path)}
+              />
+            ))}
+          </Stack>
         </Box>
-
-        {/* Separator */}
-        <Box style={{ height: 1, background: '#eef0f4', margin: '0 24px 8px' }} />
-
-        {/* Nav items */}
-        <Stack gap={2} style={{ flex: 1, paddingTop: 4, paddingBottom: 20 }}>
-          {items.map((item) => (
-            <SidebarItem
-              key={item.path}
-              item={item}
-              active={location.pathname === item.path}
-              color={meta.color}
-              onClick={() => navigate(item.path)}
-            />
-          ))}
-        </Stack>
-      </Box>
+      )}
 
       {/* ── Main content ── */}
       <Box
         style={{
-          marginLeft: SIDEBAR_W,
+          marginLeft: isImmersiveSessionRoute ? 0 : SIDEBAR_W,
           flex: 1,
-          padding: '28px 32px',
+          padding: isImmersiveSessionRoute ? 0 : '28px 32px',
           background: '#ffffff',
-          minHeight: '100vh',
+          minHeight: isImmersiveSessionRoute ? 'calc(100dvh - 56px)' : '100dvh',
+          overflow: isImmersiveSessionRoute ? 'auto' : undefined,
         }}
       >
         {children}

@@ -3,11 +3,11 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Title, Text, Button, Stack, Group, Badge, Box,
-  Paper, ThemeIcon, Skeleton, Alert,
+  ThemeIcon, Skeleton, Alert,
 } from '@mantine/core';
 import {
   IconPlayerStop, IconChartBar,
-  IconBook2, IconClipboardCheck, IconHash, IconCircleFilled, IconAlertCircle,
+  IconBook2, IconClipboardCheck, IconHash, IconCircleFilled, IconAlertCircle, IconPlayerPlay,
 } from '@tabler/icons-react';
 import { fetchSession, completeSession, selectCurrentSession, selectSessionsLoading } from '../../slices/sessionSlice';
 import { selectUserId } from '../../slices/authSlice';
@@ -45,23 +45,52 @@ interface RuntimeTokenResponse {
   };
 }
 
+const PAGE_HEIGHT = 'calc(100dvh - 56px)';
+const PAGE_MAX_WIDTH = '1540px';
+const PAGE_HORIZONTAL_PADDING = '32px';
+const PAGE_VERTICAL_PADDING = '24px';
+const UNITY_STAGE_WIDTH = 960;
+const UNITY_STAGE_HEIGHT = 600;
+const UNITY_STAGE_ASPECT = `${UNITY_STAGE_WIDTH} / ${UNITY_STAGE_HEIGHT}`;
+const STAGE_MAX_WIDTH = '1400px';
+const STAGE_MAX_HEIGHT = 'calc(100dvh - 240px)';
+const STAGE_WIDTH = `min(100%, ${STAGE_MAX_WIDTH}, calc(${STAGE_MAX_HEIGHT} * ${UNITY_STAGE_WIDTH} / ${UNITY_STAGE_HEIGHT}))`;
+
 function LoadingSkeleton() {
   return (
-    <Stack gap="md" style={{ height: 'calc(100vh - 120px)' }}>
-      <Paper radius="lg" p="md" withBorder>
-        <Group justify="space-between">
-          <Group gap="md">
-            <Skeleton circle height={44} />
-            <Box>
-              <Skeleton height={18} width={200} mb={8} />
-              <Skeleton height={12} width={280} />
-            </Box>
-          </Group>
-          <Skeleton height={36} width={120} radius="md" />
+    <Box
+      style={{
+        minHeight: PAGE_HEIGHT,
+        padding: `${PAGE_VERTICAL_PADDING} ${PAGE_HORIZONTAL_PADDING}`,
+        background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        boxSizing: 'border-box',
+      }}
+    >
+      <Stack gap="md" maw={PAGE_MAX_WIDTH} mx="auto">
+        <Group justify="space-between" align="flex-end" gap="lg" wrap="wrap">
+          <Box>
+            <Group gap="sm" mb={6}>
+              <Skeleton circle height={38} />
+              <Skeleton height={26} width={210} />
+            </Group>
+            <Group gap="sm" ml={52}>
+              <Skeleton height={16} width={84} radius="xl" />
+              <Skeleton height={16} width={70} radius="xl" />
+              <Skeleton height={16} width={88} radius="xl" />
+            </Group>
+          </Box>
+          <Skeleton height={46} width={156} radius="xl" />
         </Group>
-      </Paper>
-      <Skeleton style={{ flex: 1, minHeight: 500 }} radius="lg" />
-    </Stack>
+        <Skeleton
+          radius="md"
+          style={{
+            width: STAGE_WIDTH,
+            aspectRatio: UNITY_STAGE_ASPECT,
+            alignSelf: 'center',
+          }}
+        />
+      </Stack>
+    </Box>
   );
 }
 
@@ -223,29 +252,26 @@ export default function SessionRunner() {
   const isActive = session.status === 'active';
   const modeConf = MODE_CONFIG[session.mode] ?? MODE_CONFIG.practice;
   const statusConf = STATUS_CONFIG[session.status] ?? STATUS_CONFIG.active;
-  const ModeIcon = modeConf.icon;
 
   return (
-    <Stack gap="md" style={{ height: 'calc(100vh - 120px)' }}>
-      {/* ── Session header bar ── */}
-      <Paper
-        radius="lg" p="md" withBorder
-        style={{
-          border: '1px solid #edf0f5',
-          background: 'white',
-          position: 'sticky',
-          top: 56,
-          zIndex: 10,
-        }}
-      >
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap="md" wrap="nowrap" style={{ minWidth: 0 }}>
-            <ThemeIcon size={44} radius="xl" variant="light" color={modeConf.color}>
-              <ModeIcon size={22} />
-            </ThemeIcon>
-            <Box style={{ minWidth: 0 }}>
-              <Title order={4} fw={700} lineClamp={1}>Simulation Session</Title>
-              <Group gap="sm" mt={2}>
+    <Box
+      style={{
+        minHeight: PAGE_HEIGHT,
+        padding: `${PAGE_VERTICAL_PADDING} ${PAGE_HORIZONTAL_PADDING}`,
+        background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        boxSizing: 'border-box',
+      }}
+    >
+      <Stack gap="md" maw={PAGE_MAX_WIDTH} mx="auto">
+        <Group justify="space-between" align="flex-end" wrap="wrap" gap="lg">
+          <Box>
+            <Group gap="sm" mb={4}>
+              <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
+                <IconPlayerPlay size={18} color="white" />
+              </ThemeIcon>
+              <Title order={2} fw={700}>Simulation Session</Title>
+            </Group>
+            <Group gap="sm" ml={52} wrap="wrap">
                 <Group gap={4}>
                   <IconHash size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
                   <Text size="xs" c="dimmed">Attempt {session.attemptNo}</Text>
@@ -254,25 +280,30 @@ export default function SessionRunner() {
                   {modeConf.label}
                 </Badge>
                 <Badge
-                  variant="dot" color={statusConf.color} size="xs" radius="xl"
+                  variant="light"
+                  color={statusConf.color}
+                  size="xs"
+                  radius="xl"
                   leftSection={
                     isActive
-                      ? <IconCircleFilled size={8} style={{ color: 'var(--mantine-color-green-6)', animation: 'pulse 2s infinite' }} />
+                      ? <IconCircleFilled size={8} style={{ color: 'var(--mantine-color-green-6)' }} />
                       : undefined
                   }
                 >
                   {statusConf.label}
                 </Badge>
-              </Group>
-            </Box>
-          </Group>
+            </Group>
+          </Box>
 
           <Group gap="sm" wrap="nowrap" style={{ flexShrink: 0 }}>
             {isActive ? (
               <Button
-                variant="light"
+                variant="filled"
                 color="red"
-                radius="md"
+                size="md"
+                h={46}
+                px="xl"
+                radius="xl"
                 leftSection={<IconPlayerStop size={16} />}
                 onClick={handleScoreAndComplete}
                 loading={scoring}
@@ -282,9 +313,12 @@ export default function SessionRunner() {
               </Button>
             ) : (
               <Button
-                variant="light"
+                variant="filled"
                 color="indigo"
-                radius="md"
+                size="md"
+                h={46}
+                px="xl"
+                radius="xl"
                 leftSection={<IconChartBar size={16} />}
                 onClick={handleViewResults}
               >
@@ -293,67 +327,49 @@ export default function SessionRunner() {
             )}
           </Group>
         </Group>
-      </Paper>
 
-      {/* ── Unity iframe ── */}
-      <Paper
-        radius="lg"
-        withBorder
-        style={{
-          flex: 1,
-          overflow: 'hidden',
-          border: '1px solid #edf0f5',
-          position: 'relative',
-        }}
-      >
         {runtimeError && isActive && (
           <Alert
             color="red"
             icon={<IconAlertCircle size={16} />}
-            m="md"
-            mb={0}
             radius="md"
             variant="light"
           >
             {runtimeError}
           </Alert>
         )}
-        {unitySrc ? (
-          <iframe
-            ref={iframeRef}
-            src={unitySrc}
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              display: 'block',
-              minHeight: 560,
-            }}
-            allow="microphone; autoplay"
-            title="Unity Simulation"
-          />
-        ) : (
-          <Alert
-            color="red"
-            icon={<IconAlertCircle size={16} />}
-            m="md"
-            radius="md"
-            variant="light"
-          >
-            This session does not have a published Unity build URL. Publish a Unity build and relaunch the session.
-          </Alert>
-        )}
-      </Paper>
 
-      {/* Pulse animation for active indicator */}
-      {isActive && (
-        <style>{`
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-          }
-        `}</style>
-      )}
-    </Stack>
+        <Box style={{ display: 'flex', justifyContent: 'center', paddingTop: 4 }}>
+          {unitySrc ? (
+            <iframe
+              ref={iframeRef}
+              src={unitySrc}
+              style={{
+                width: STAGE_WIDTH,
+                aspectRatio: UNITY_STAGE_ASPECT,
+                border: 'none',
+                display: 'block',
+                background: '#000',
+                borderRadius: 12,
+                boxShadow: '0 20px 48px rgba(15, 23, 42, 0.10)',
+              }}
+              allow="microphone; autoplay"
+              title="Unity Simulation"
+            />
+          ) : (
+            <Alert
+              color="red"
+              icon={<IconAlertCircle size={16} />}
+              radius="md"
+              variant="light"
+              maw={560}
+              style={{ width: STAGE_WIDTH }}
+            >
+              This session does not have a published Unity build URL. Publish a Unity build and relaunch the session.
+            </Alert>
+          )}
+        </Box>
+      </Stack>
+    </Box>
   );
 }

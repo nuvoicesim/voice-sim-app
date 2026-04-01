@@ -151,7 +151,7 @@ sceneCatalogTable.grantReadData(backend.sessionFunction.resources.lambda);
 patientProfileTable.grantReadData(backend.sessionFunction.resources.lambda);
 unityBuildTable.grantReadData(backend.sessionFunction.resources.lambda);
 enrollmentTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
-turnTable.grantReadData(backend.sessionFunction.resources.lambda);
+turnTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
 evaluationTable.grantReadData(backend.sessionFunction.resources.lambda);
 backend.sessionFunction.addEnvironment("TABLE_NAME", sessionTable.tableName);
 backend.sessionFunction.addEnvironment("ASSIGNMENT_TABLE_NAME", assignmentTable.tableName);

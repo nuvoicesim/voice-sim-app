@@ -69,17 +69,30 @@ interface SessionTurnRecord {
   userText: string;
   modelText: string;
   userSpeechStartAt?: string;
+  userSpeechEndAt?: string;
   patientSpeechStartAt?: string;
+  patientSpeechEndAt?: string;
   emotionCode: number;
   motionCode: number;
   latencyMs: number;
   timestamp: string;
 }
 
+interface SessionTurnView extends SessionTurnRecord {
+  userSpeechDurationMs?: number;
+  patientSpeechDurationMs?: number;
+}
+
 interface SessionStartOutcome {
   session: SessionRecord;
   resumed: boolean;
 }
+
+type TurnTimingField =
+  | "userSpeechStartAt"
+  | "userSpeechEndAt"
+  | "patientSpeechStartAt"
+  | "patientSpeechEndAt";
 
 async function getAssignmentStatus(assignmentId: string): Promise<string | null> {
   if (!ASSIGNMENT_TABLE) {
@@ -195,6 +208,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         if (error instanceof RuntimeTokenError) {
           return createResponse(error.statusCode, { error: error.message });
         }
+        console.error("session turn timing update failed", {
+          sessionId: pathParams.sessionId,
+          turnIndex: pathParams.turnIndex,
+          hasBody: Boolean(event.body),
+          error: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     }
@@ -518,15 +537,16 @@ async function handleGetSession(
   }
 
   // Fetch turns
-  let turns: SessionTurnRecord[] = [];
+  let turns: SessionTurnView[] = [];
   if (TURN_TABLE) {
-    turns = await queryItems(
+    const storedTurns = await queryItems(
       TURN_TABLE,
       "sessionId = :sid",
       { ":sid": sessionId },
       dynamo,
       { scanIndexForward: true }
-    );
+    ) as SessionTurnRecord[];
+    turns = storedTurns.map(buildSessionTurnView);
   }
 
   // Fetch evaluation
@@ -555,6 +575,44 @@ function normalizeIsoTimestamp(value: unknown): string | null {
   return parsed.toISOString();
 }
 
+function calculateDurationMs(startAt?: string, endAt?: string): number | undefined {
+  if (!startAt || !endAt) {
+    return undefined;
+  }
+
+  const startMs = new Date(startAt).getTime();
+  const endMs = new Date(endAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return undefined;
+  }
+
+  return endMs - startMs;
+}
+
+function buildSessionTurnView(turn: SessionTurnRecord): SessionTurnView {
+  return {
+    ...turn,
+    userSpeechDurationMs: calculateDurationMs(turn.userSpeechStartAt, turn.userSpeechEndAt),
+    patientSpeechDurationMs: calculateDurationMs(turn.patientSpeechStartAt, turn.patientSpeechEndAt),
+  };
+}
+
+function validateTimingOrder(
+  turn: Pick<SessionTurnRecord, "userSpeechStartAt" | "userSpeechEndAt" | "patientSpeechStartAt" | "patientSpeechEndAt">
+): string | null {
+  const userDurationMs = calculateDurationMs(turn.userSpeechStartAt, turn.userSpeechEndAt);
+  if (turn.userSpeechStartAt && turn.userSpeechEndAt && userDurationMs === undefined) {
+    return "userSpeechEndAt must be greater than or equal to userSpeechStartAt";
+  }
+
+  const patientDurationMs = calculateDurationMs(turn.patientSpeechStartAt, turn.patientSpeechEndAt);
+  if (turn.patientSpeechStartAt && turn.patientSpeechEndAt && patientDurationMs === undefined) {
+    return "patientSpeechEndAt must be greater than or equal to patientSpeechStartAt";
+  }
+
+  return null;
+}
+
 async function handleUpdateTurn(
   sessionId: string,
   turnIndexParam: string,
@@ -577,44 +635,59 @@ async function handleUpdateTurn(
     return badRequestResponse("turnIndex must be a positive integer");
   }
 
-  const payload = parseJsonBody(body);
+  let payload: unknown;
+  try {
+    payload = parseJsonBody(body);
+  } catch (error) {
+    return badRequestResponse(error instanceof Error ? error.message : "Invalid JSON format in request body");
+  }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return badRequestResponse("Request body must be a JSON object");
   }
-  const updates: Record<string, string> = {};
-
-  if ("userSpeechStartAt" in payload) {
-    const userSpeechStartAt = normalizeIsoTimestamp(payload.userSpeechStartAt);
-    if (!userSpeechStartAt) {
-      return badRequestResponse("userSpeechStartAt must be a valid ISO timestamp");
-    }
-    updates.userSpeechStartAt = userSpeechStartAt;
-  }
-
-  if ("patientSpeechStartAt" in payload) {
-    const patientSpeechStartAt = normalizeIsoTimestamp(payload.patientSpeechStartAt);
-    if (!patientSpeechStartAt) {
-      return badRequestResponse("patientSpeechStartAt must be a valid ISO timestamp");
-    }
-    updates.patientSpeechStartAt = patientSpeechStartAt;
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return badRequestResponse("Provide userSpeechStartAt and/or patientSpeechStartAt");
-  }
+  const payloadObj = payload as Record<string, unknown>;
 
   const turn = await getItem(TURN_TABLE, { sessionId, turnIndex }, dynamo);
   if (!turn) {
     return notFoundResponse("Session turn not found");
   }
 
+  const updates: Partial<Record<TurnTimingField, string>> = {};
+  const timingFields: TurnTimingField[] = [
+    "userSpeechStartAt",
+    "userSpeechEndAt",
+    "patientSpeechStartAt",
+    "patientSpeechEndAt",
+  ];
+
+  for (const field of timingFields) {
+    if (field in payloadObj) {
+      const normalized = normalizeIsoTimestamp(payloadObj[field]);
+      if (!normalized) {
+        return badRequestResponse(`${field} must be a valid ISO timestamp`);
+      }
+      updates[field] = normalized;
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return badRequestResponse(
+      "Provide one or more timing fields: userSpeechStartAt, userSpeechEndAt, patientSpeechStartAt, patientSpeechEndAt"
+    );
+  }
+
+  const mergedTurn = {
+    ...turn,
+    ...updates,
+  } as SessionTurnRecord;
+  const timingError = validateTimingOrder(mergedTurn);
+  if (timingError) {
+    return badRequestResponse(timingError);
+  }
+
   await updateItem(TURN_TABLE, { sessionId, turnIndex }, updates, dynamo);
 
   return createResponse(HTTP_STATUS.OK, {
-    turn: {
-      ...turn,
-      ...updates,
-    },
+    turn: buildSessionTurnView(mergedTurn),
   });
 }
 

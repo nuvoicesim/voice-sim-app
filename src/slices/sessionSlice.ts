@@ -23,7 +23,11 @@ export interface SessionTurn {
   userText: string;
   modelText: string;
   userSpeechStartAt?: string;
+  userSpeechEndAt?: string;
+  userSpeechDurationMs?: number;
   patientSpeechStartAt?: string;
+  patientSpeechEndAt?: string;
+  patientSpeechDurationMs?: number;
   emotionCode: number;
   motionCode: number;
   latencyMs: number;
