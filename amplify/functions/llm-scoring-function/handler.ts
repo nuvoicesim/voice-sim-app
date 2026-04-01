@@ -9,14 +9,21 @@ import {
   callOpenAIChat,
   OpenAIUpstreamError,
   type OpenAIMessage,
+  requireRuntimeTokenClaims,
+  applyRuntimeClaimsToBody,
+  RuntimeTokenError,
+  resolveRuntimeConfig,
+  ContextResolutionError,
+  createDynamoDbClient,
+  putItem,
+  generateTimestamp,
+  type OpenAIUsage,
 } from "../shared";
-
-type SimulationLevel = 1 | 2 | 3;
-type Scenario = "task1" | "task2" | "task3";
 
 interface ConversationTurn {
   patient: string;
-  nurse: string;
+  nurse?: string;
+  slpStudent?: string;
 }
 
 interface RuntimeContext {
@@ -26,7 +33,6 @@ interface RuntimeContext {
 
 interface ScoringRequestBody {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   conversationTurns: ConversationTurn[];
   scenario?: string;
@@ -53,7 +59,6 @@ interface ScoringReport {
 
 interface ValidatedScoringRequest {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   conversationTurns: ConversationTurn[];
   scenario?: string;
@@ -72,6 +77,8 @@ const DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.LLM_SCORING_MAX_OUTPUT_TOKE
 const DEFAULT_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? "12000");
 const UPSTREAM_RETRIES = Number(process.env.LLM_UPSTREAM_RETRIES ?? "1");
 const MAX_INPUT_CHARS = Number(process.env.LLM_SCORING_MAX_INPUT_CHARS ?? "50000");
+const RUNTIME_TOKEN_SECRET = process.env.RUNTIME_TOKEN_SECRET ?? "";
+const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
 
 const STRICT_RETRY_INSTRUCTION = [
   "CRITICAL OUTPUT REQUIREMENTS:",
@@ -124,9 +131,6 @@ const CRITERIA_NAMES = [
   "Session Closure",
 ] as const;
 
-import { SCORING_PROMPTS } from "./promptStrings";
-import { resolveScenarioKey, ContextResolutionError, createDynamoDbClient, putItem, generateTimestamp } from "../shared";
-
 const ASSIGNMENT_TABLE_NAME = process.env.ASSIGNMENT_TABLE_NAME;
 const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
 const EVALUATION_TABLE_NAME = process.env.EVALUATION_TABLE_NAME;
@@ -156,12 +160,6 @@ function getRequestId(headers: Record<string, string | undefined> | undefined): 
     return requestIdHeader.trim();
   }
   return randomUUID();
-}
-
-function mapScenarioFromLevel(simulationLevel: SimulationLevel): Scenario {
-  if (simulationLevel === 1) return "task1";
-  if (simulationLevel === 2) return "task2";
-  return "task3";
 }
 
 function asInteger(value: unknown): number | null {
@@ -287,10 +285,9 @@ function validateScoringRequest(payload: unknown): { request?: ValidatedScoringR
   const hasContext = body.context && typeof body.context === "object"
     && typeof body.context.assignmentId === "string"
     && typeof body.context.sessionId === "string";
-  const hasLevel = typeof body.simulationLevel === "number" && [1, 2, 3].includes(body.simulationLevel);
 
-  if (!hasContext && !hasLevel) {
-    return { error: "Provide context.assignmentId + context.sessionId, or simulationLevel (1, 2, or 3)" };
+  if (!hasContext) {
+    return { error: "Provide context.assignmentId + context.sessionId" };
   }
 
   if (!Array.isArray(body.conversationTurns) || body.conversationTurns.length === 0) {
@@ -304,18 +301,27 @@ function validateScoringRequest(payload: unknown): { request?: ValidatedScoringR
     }
 
     const patient = (turn as Partial<ConversationTurn>).patient;
+    const slpStudent = (turn as Partial<ConversationTurn>).slpStudent;
     const nurse = (turn as Partial<ConversationTurn>).nurse;
     if (typeof patient !== "string" || patient.trim() === "") {
       return { error: "conversationTurns[].patient must be a non-empty string" };
     }
 
-    if (typeof nurse !== "string" || nurse.trim() === "") {
-      return { error: "conversationTurns[].nurse must be a non-empty string" };
+    const normalizedStudentUtterance =
+      typeof slpStudent === "string" && slpStudent.trim() !== ""
+        ? slpStudent.trim()
+        : typeof nurse === "string" && nurse.trim() !== ""
+          ? nurse.trim()
+          : null;
+
+    if (!normalizedStudentUtterance) {
+      return { error: "conversationTurns[].slpStudent must be a non-empty string" };
     }
 
     conversationTurns.push({
       patient: patient.trim(),
-      nurse: nurse.trim(),
+      nurse: normalizedStudentUtterance,
+      slpStudent: normalizedStudentUtterance,
     });
   }
 
@@ -324,7 +330,6 @@ function validateScoringRequest(payload: unknown): { request?: ValidatedScoringR
   return {
     request: {
       userID: body.userID,
-      simulationLevel: hasLevel ? body.simulationLevel : undefined,
       context: hasContext ? { assignmentId: body.context!.assignmentId, sessionId: body.context!.sessionId } : undefined,
       conversationTurns,
       scenario: typeof body.scenario === "string" ? body.scenario : undefined,
@@ -375,13 +380,25 @@ function buildScoringPrompt(conversationTurns: ConversationTurn[]): string {
       return [
         `Turn ${index + 1}:`,
         `Patient: "${turn.patient}"`,
-        `Nursing Student: "${turn.nurse}"`,
+        `SLP Student: "${turn.slpStudent || turn.nurse}"`,
         "",
       ].join("\n");
     })
     .join("\n");
 
   return `Now analyze the following full simulated conversation between the patient and a SLP student:\n\n${conversationText}`;
+}
+
+function resolveMaxOutputTokens(configuredValue: unknown): number {
+  const configuredTokens = typeof configuredValue === "number"
+    ? Math.floor(configuredValue)
+    : Number.NaN;
+
+  if (!Number.isFinite(configuredTokens) || configuredTokens <= 0) {
+    return DEFAULT_MAX_OUTPUT_TOKENS;
+  }
+
+  return Math.min(configuredTokens, DEFAULT_MAX_OUTPUT_TOKENS);
 }
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -437,6 +454,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  try {
+    const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+    payload = applyRuntimeClaimsToBody((payload as Record<string, unknown>) ?? {}, runtimeClaims);
+  } catch (error) {
+    if (error instanceof RuntimeTokenError) {
+      return respond(error.statusCode, {
+        error: error.message,
+        requestId,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+
   const validation = validateScoringRequest(payload);
   if (!validation.request) {
     return respond(HTTP_STATUS.BAD_REQUEST, {
@@ -449,36 +480,34 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const request = validation.request;
 
   let scenario: string;
-  let isLegacy = true;
+  let runtimeConfig;
   try {
-    const resolved = await resolveScenarioKey(
-      { context: request.context, simulationLevel: request.simulationLevel },
+    runtimeConfig = await resolveRuntimeConfig(
+      { context: request.context },
       ASSIGNMENT_TABLE_NAME || "",
       SCENE_CATALOG_TABLE_NAME || "",
+      PATIENT_PROFILE_TABLE_NAME || "",
       dynamo
     );
-    scenario = resolved.scenarioKey;
-    isLegacy = resolved.isLegacy;
+    scenario = runtimeConfig.scenarioKey;
   } catch (error) {
     if (error instanceof ContextResolutionError) {
       return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
     }
-    if (request.simulationLevel) {
-      scenario = mapScenarioFromLevel(request.simulationLevel);
-    } else {
-      return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
-    }
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
   }
 
-  const promptVersion = `${scenario}-scoring-v1`;
-  const scoringPrompt = SCORING_PROMPTS[scenario as keyof typeof SCORING_PROMPTS];
-  if (!scoringPrompt) {
+  const scoringConfig = runtimeConfig?.scoring;
+  if (!scoringConfig?.systemPrompt) {
     return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      error: "Configuration error",
+      error: "Scoring runtime config is missing for this assignment",
       requestId,
       retryable: false,
     });
   }
+  const promptVersion = scoringConfig.version || "runtime-scoring";
+  const scoringPrompt = scoringConfig.systemPrompt;
+  const maxOutputTokens = resolveMaxOutputTokens(scoringConfig.maxOutputTokens);
 
   const userPrompt = buildScoringPrompt(request.conversationTurns);
   if (userPrompt.length > MAX_INPUT_CHARS) {
@@ -502,19 +531,36 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     return callOpenAIChat({
       apiKey: OPENAI_API_KEY,
-      model: DEFAULT_MODEL,
+      model: scoringConfig?.model || DEFAULT_MODEL,
       messages,
-      temperature: DEFAULT_TEMPERATURE,
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      temperature: scoringConfig?.temperature ?? DEFAULT_TEMPERATURE,
+      maxOutputTokens,
       responseFormat: SCORING_RESPONSE_FORMAT,
       timeoutMs: DEFAULT_TIMEOUT_MS,
       upstreamRetries: UPSTREAM_RETRIES,
     });
   };
 
-  let modelResponse;
+  let modelResponse:
+    | Awaited<ReturnType<typeof callOpenAIChat>>
+    | null = null;
+  let report: ScoringReport | null = null;
+  let fallbackUsed = false;
+  let malformedRetryTriggered = false;
+  let upstreamFallbackUsed = false;
+  let fallbackReason: "provider_error" | "malformed_model_output" | null = null;
+  let upstreamFailure: { statusCode: number; retryable: boolean } | null = null;
+  let finalModel = scoringConfig?.model || DEFAULT_MODEL;
+  let finalUsage: OpenAIUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+
   try {
     modelResponse = await invokeScoringModel(false);
+    finalModel = modelResponse.model;
+    finalUsage = modelResponse.usage;
   } catch (error) {
     const upstream = error instanceof OpenAIUpstreamError
       ? mapUpstreamError(error)
@@ -527,26 +573,26 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     console.error("llm-scoring upstream error", {
       requestId,
       userID: request.userID,
-      simulationLevel: request.simulationLevel,
       promptVersion,
       scenario,
       details: error instanceof Error ? error.message : String(error),
     });
 
-    return respond(upstream.statusCode, {
-      error: upstream.message,
-      requestId,
+    upstreamFallbackUsed = true;
+    fallbackUsed = true;
+    fallbackReason = "provider_error";
+    upstreamFailure = {
+      statusCode: upstream.statusCode,
       retryable: upstream.retryable,
-    });
+    };
+    report = fallbackScoringReport();
   }
 
-  let report = parseScoringReport(modelResponse.content ?? "");
-  let fallbackUsed = false;
-  let malformedRetryTriggered = false;
-  let finalModel = modelResponse.model;
-  let finalUsage = modelResponse.usage;
+  if (modelResponse) {
+    report = parseScoringReport(modelResponse.content ?? "");
+  }
 
-  if (!report) {
+  if (modelResponse && !report) {
     malformedRetryTriggered = true;
     try {
       const strictRetryResponse = await invokeScoringModel(true);
@@ -557,7 +603,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       console.error("llm-scoring strict retry failed", {
         requestId,
         userID: request.userID,
-        simulationLevel: request.simulationLevel,
         promptVersion,
         scenario,
         details: error instanceof Error ? error.message : String(error),
@@ -567,6 +612,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   if (!report) {
     fallbackUsed = true;
+    fallbackReason = fallbackReason ?? "malformed_model_output";
     report = fallbackScoringReport();
   }
 
@@ -579,17 +625,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     latencyMs,
     createdAt: new Date().toISOString(),
     metadata: {
-      scenario,
       promptVersion,
       sessionId: request.metadata.sessionId,
       turnIndex: request.metadata.turnIndex,
       fallbackUsed,
       malformedRetryTriggered,
+      upstreamFallbackUsed,
+      fallbackReason,
+      upstreamFailure,
     },
   };
 
   // Persist evaluation to SessionEvaluation table when using context-based flow
-  if (!isLegacy && request.context?.sessionId && EVALUATION_TABLE_NAME && report) {
+  if (request.context?.sessionId && EVALUATION_TABLE_NAME && report) {
     try {
       await putItem(EVALUATION_TABLE_NAME, {
         sessionId: request.context.sessionId,
@@ -608,19 +656,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   console.log("llm-scoring request completed", {
     requestId,
     userID: request.userID,
-    simulationLevel: request.simulationLevel,
     context: request.context,
     model: finalModel,
     latencyMs,
     usage: finalUsage,
     promptVersion,
     scenario,
+    maxOutputTokens,
     sessionId: request.metadata.sessionId,
     turnIndex: request.metadata.turnIndex,
     fallbackUsed,
     malformedRetryTriggered,
+    upstreamFallbackUsed,
+    fallbackReason,
   });
 
   return respond(HTTP_STATUS.OK, responseBody);
 };
-
