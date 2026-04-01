@@ -25,13 +25,17 @@
     "react-dom": "^18.2.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^7.8.0",
-    "reselect": "^5.1.1"
+    "reselect": "^5.1.1",
+    "unzipper": "^0.12.3"
   },
   "devDependencies": {
     "@aws-amplify/backend": "^1.5.0",
     "@aws-amplify/backend-cli": "^1.2.9",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1021.0",
     "@aws-sdk/client-dynamodb": "^3.1000.0",
+    "@aws-sdk/client-s3": "^3.864.0",
     "@aws-sdk/lib-dynamodb": "^3.1000.0",
+    "@aws-sdk/s3-request-presigner": "^3.864.0",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@typescript-eslint/eslint-plugin": "^7.2.0",

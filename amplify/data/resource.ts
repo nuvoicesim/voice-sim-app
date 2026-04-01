@@ -55,6 +55,8 @@ const schema = a.schema({
       description: a.string(),
       difficulty: a.string(),
       tags: a.json(),
+      unityBuildId: a.string(),
+      unityBuildFolder: a.string(),
       isActive: a.boolean().required(),
       createdAt: a.string().required(),
       updatedAt: a.string().required(),
@@ -66,6 +68,7 @@ const schema = a.schema({
     .model({
       assignmentId: a.string().required(),
       sceneId: a.string().required(),
+      patientProfileId: a.string().required(),
       title: a.string().required(),
       description: a.string(),
       mode: a.enum(["practice", "assessment"]),
@@ -80,6 +83,40 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["assignmentId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  PatientProfile: a
+    .model({
+      patientProfileId: a.string().required(),
+      displayName: a.string().required(),
+      profileKey: a.string().required(),
+      dialogueConfig: a.json().required(),
+      scoringConfig: a.json().required(),
+      ttsConfig: a.json().required(),
+      status: a.enum(["draft", "published", "archived"]),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["patientProfileId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  UnityBuild: a
+    .model({
+      unityBuildId: a.string().required(),
+      displayName: a.string().required(),
+      buildKey: a.string().required(),
+      sourceZipKey: a.string().required(),
+      sourceFileName: a.string().required(),
+      entryHtml: a.string().required(),
+      publishedPrefix: a.string(),
+      publicBaseUrl: a.string(),
+      launchUrl: a.string(),
+      status: a.enum(["uploaded", "published", "archived", "failed"]),
+      publishedAt: a.string(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["unityBuildId"])
     .authorization((allow) => [allow.authenticated()]),
 
   AssignmentEnrollment: a

@@ -21,8 +21,8 @@ export * from './openai';
 // Export context resolver
 export * from './context-resolver';
 
-// Export auth middleware
-export * from './auth-middleware';
+export * from './runtime-token';
+export * from './runtime-config';
 
 // Re-export commonly used types for convenience
 export type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
