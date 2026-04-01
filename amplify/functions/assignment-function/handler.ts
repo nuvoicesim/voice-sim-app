@@ -15,11 +15,11 @@ import {
   generateId,
   generateTimestamp,
 } from "../shared";
-import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import { extractCallerIdentity, requireRole, type CallerIdentity } from "../shared/auth-middleware";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 
 const TABLE_NAME = process.env.TABLE_NAME;
-const ENROLLMENT_TABLE_NAME = process.env.ENROLLMENT_TABLE_NAME;
+const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -31,7 +31,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   try {
     // PUT /assignments/{assignmentId}/status
     if (method === "PUT" && pathParams?.assignmentId && event.resource?.includes("/status")) {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["faculty", "admin"]);
       if (authError) return authError;
       return await handleUpdateStatus(pathParams.assignmentId, event.body);
@@ -39,7 +39,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     // PUT /assignments/{assignmentId}
     if (method === "PUT" && pathParams?.assignmentId) {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["faculty", "admin"]);
       if (authError) return authError;
       return await handleUpdateAssignment(pathParams.assignmentId, event.body);
@@ -47,19 +47,24 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     // GET /assignments/{assignmentId}
     if (method === "GET" && pathParams?.assignmentId) {
-      return await handleGetAssignment(pathParams.assignmentId);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["student", "faculty", "admin"]);
+      if (authError) return authError;
+      return await handleGetAssignment(pathParams.assignmentId, caller!);
     }
 
     // GET /assignments
     if (method === "GET") {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["student", "faculty", "admin"]);
+      if (authError) return authError;
       const params = getQueryParams(event.queryStringParameters);
-      return await handleListAssignments(caller, params);
+      return await handleListAssignments(caller!, params);
     }
 
     // POST /assignments
     if (method === "POST") {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["faculty", "admin"]);
       if (authError) return authError;
       return await handleCreateAssignment(caller!.userId, event.body);
@@ -74,20 +79,39 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
 async function handleCreateAssignment(createdBy: string, body: string | null) {
   const payload = parseJsonBody(body);
-  const { sceneId, title, mode, attemptPolicy, surveyPolicy, dueDate, targetType, targetId, description } = payload;
+  const {
+    sceneId,
+    patientProfileId,
+    title,
+    mode,
+    attemptPolicy,
+    surveyPolicy,
+    dueDate,
+    targetType,
+    targetId,
+    description,
+  } = payload;
 
-  if (!sceneId || !title || !mode) {
-    return badRequestResponse("Missing required fields: sceneId, title, mode");
+  if (!sceneId || !patientProfileId || !title || !mode) {
+    return badRequestResponse("Missing required fields: sceneId, patientProfileId, title, mode");
   }
 
   if (!["practice", "assessment"].includes(mode)) {
     return badRequestResponse("mode must be 'practice' or 'assessment'");
   }
 
+  if (PATIENT_PROFILE_TABLE_NAME) {
+    const patientProfile = await getItem(PATIENT_PROFILE_TABLE_NAME, { patientProfileId }, dynamo);
+    if (!patientProfile) {
+      return badRequestResponse("patientProfileId does not reference an existing patient profile");
+    }
+  }
+
   const now = generateTimestamp();
   const item = {
     assignmentId: generateId(),
     sceneId,
+    patientProfileId,
     title,
     description: description || "",
     mode,
@@ -106,19 +130,25 @@ async function handleCreateAssignment(createdBy: string, body: string | null) {
   return createResponse(HTTP_STATUS.CREATED, item);
 }
 
-async function handleGetAssignment(assignmentId: string) {
+async function handleGetAssignment(
+  assignmentId: string,
+  caller: CallerIdentity
+) {
   const item = await getItem(TABLE_NAME, { assignmentId }, dynamo);
   if (!item) return notFoundResponse("Assignment not found");
+  if (caller.role === "student" && item.status !== "published") {
+    return notFoundResponse("Assignment not found");
+  }
   return createResponse(HTTP_STATUS.OK, item);
 }
 
 async function handleListAssignments(
-  caller: ReturnType<typeof extractCallerIdentity>,
+  caller: CallerIdentity,
   params: Record<string, string>
 ) {
   const statusFilter = params.status;
   let filterExpression: string | undefined;
-  let expressionValues: Record<string, any> | undefined;
+  let expressionValues: Record<string, string> | undefined;
 
   if (statusFilter) {
     filterExpression = "#s = :status";
@@ -153,6 +183,13 @@ async function handleUpdateAssignment(assignmentId: string, body: string | null)
   delete payload.assignmentId;
   delete payload.createdBy;
   delete payload.createdAt;
+
+  if (payload.patientProfileId && PATIENT_PROFILE_TABLE_NAME) {
+    const patientProfile = await getItem(PATIENT_PROFILE_TABLE_NAME, { patientProfileId: payload.patientProfileId }, dynamo);
+    if (!patientProfile) {
+      return badRequestResponse("patientProfileId does not reference an existing patient profile");
+    }
+  }
 
   const updated = {
     ...existing,

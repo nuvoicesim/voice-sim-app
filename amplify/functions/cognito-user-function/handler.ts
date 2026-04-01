@@ -1,5 +1,5 @@
 import type { APIGatewayProxyHandler } from "aws-lambda";
-import { 
+import {
   createResponse, 
   optionsResponse, 
   badRequestResponse, 
@@ -11,11 +11,30 @@ import {
   getQueryParams,
   HTTP_STATUS
 } from "../shared";
-import { CognitoIdentityProviderClient, AdminCreateUserCommand, AdminGetUserCommand, AdminSetUserPasswordCommand, AdminUpdateUserAttributesCommand, ListUsersCommand } from "@aws-sdk/client-cognito-identity-provider";
+import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import {
+  CognitoIdentityProviderClient,
+  AdminCreateUserCommand,
+  AdminGetUserCommand,
+  AdminSetUserPasswordCommand,
+  AdminUpdateUserAttributesCommand,
+  ListUsersCommand,
+  type AttributeType,
+  type UserType,
+} from "@aws-sdk/client-cognito-identity-provider";
 
 const cognitoClient = new CognitoIdentityProviderClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const USER_POOL_ID = process.env.USER_POOL_ID;
-const VALID_ROLES = ["student", "faculty", "admin"] as const;
+const VALID_ROLES = ["student", "faculty", "simulation_designer", "admin"] as const;
+
+function attributesToMap(attributes: AttributeType[] | undefined): Record<string, string> {
+  return (attributes || []).reduce<Record<string, string>>((acc, attr) => {
+    if (attr.Name && attr.Value) {
+      acc[attr.Name] = attr.Value;
+    }
+    return acc;
+  }, {});
+}
 
 export const handler: APIGatewayProxyHandler = async (event) => {
   console.log('Event received:', JSON.stringify(event, null, 2));
@@ -34,26 +53,38 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   try {
+    const caller = await extractCallerIdentity(event);
+
     // PUT /cognito-user/{userId}/role — update user role (admin only)
     if (method === "PUT" && pathParams?.userId && event.resource?.includes("/role")) {
+      const authError = requireRole(caller, ["admin"]);
+      if (authError) return authError;
       return await handleUpdateRole(pathParams.userId, event.body);
     }
 
     // GET /cognito-user?list=true — list all users
     if (method === "GET" && queryParams.list === "true") {
+      const authError = requireRole(caller, ["admin"]);
+      if (authError) return authError;
       return await handleListUsers(queryParams);
     }
 
     if (method === "GET") {
+      const authError = requireRole(caller, ["admin"]);
+      if (authError) return authError;
       return await handleGetUser(queryParams);
     }
 
     // POST /cognito-user/resolve — batch resolve userIds to emails
     if (method === "POST" && event.resource?.includes("/resolve")) {
+      const authError = requireRole(caller, ["admin"]);
+      if (authError) return authError;
       return await handleBatchResolve(event.body);
     }
 
     if (method === "POST") {
+      const authError = requireRole(caller, ["admin"]);
+      if (authError) return authError;
       return await handleCreateUser(event.body);
     }
 
@@ -125,7 +156,7 @@ async function handleCreateUser(body: string | null) {
       
       // If we reach here, user already exists
       return conflictResponse("Username already exists");
-    } catch (error: any) {
+    } catch {
       console.log("User doesn't exist, proceeding with creation");
     }
     
@@ -221,12 +252,7 @@ async function handleGetUser(queryParams: Record<string, string>) {
     const userInfo = {
       username: result.Username,
       userStatus: result.UserStatus,
-      attributes: result.UserAttributes?.reduce((acc: any, attr: any) => {
-        if (attr.Name && attr.Value) {
-          acc[attr.Name] = attr.Value;
-        }
-        return acc;
-      }, {}),
+      attributes: attributesToMap(result.UserAttributes),
     };
 
     return createResponse(HTTP_STATUS.OK, userInfo);
@@ -242,11 +268,7 @@ async function handleGetUser(queryParams: Record<string, string>) {
 async function handleUpdateRole(userId: string, body: string | null) {
   try {
     const payload = parseJsonBody(body);
-    const { role, callerRole } = payload;
-
-    if (callerRole !== "admin") {
-      return createResponse(HTTP_STATUS.FORBIDDEN, { error: "Only admins can update user roles" });
-    }
+    const { role } = payload;
 
     if (!role || !VALID_ROLES.includes(role)) {
       return badRequestResponse(`Invalid role. Must be one of: ${VALID_ROLES.join(", ")}`);
@@ -265,8 +287,8 @@ async function handleUpdateRole(userId: string, body: string | null) {
       userId,
       role,
     });
-  } catch (error: any) {
-    if (error.name === "UserNotFoundException") {
+  } catch (error) {
+    if (error instanceof Error && error.name === "UserNotFoundException") {
       return notFoundResponse("User not found");
     }
     console.error("Error updating role:", error);
@@ -284,16 +306,13 @@ async function handleListUsers(queryParams: Record<string, string>) {
     const roleFilter = queryParams.role;
     const search = queryParams.search?.trim();
 
-    const mapUsers = (cognitoUsers: any[]) =>
+    const mapUsers = (cognitoUsers: UserType[]) =>
       cognitoUsers.map((u) => ({
         username: u.Username,
         userStatus: u.UserStatus,
         enabled: u.Enabled,
         createdAt: u.UserCreateDate?.toISOString(),
-        attributes: u.Attributes?.reduce((acc: any, attr: any) => {
-          if (attr.Name && attr.Value) acc[attr.Name] = attr.Value;
-          return acc;
-        }, {}),
+        attributes: attributesToMap(u.Attributes),
       }));
 
     if (search) {

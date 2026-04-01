@@ -7,7 +7,6 @@ import {
   methodNotAllowedResponse,
   serverErrorResponse,
   parseJsonBody,
-  getQueryParams,
   HTTP_STATUS,
   createDynamoDbClient,
   getItem,
@@ -31,7 +30,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   try {
     // POST /sessions/{sessionId}/survey-response (student submits survey)
     if (method === "POST" && pathParams?.sessionId) {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["student"]);
       if (authError) return authError;
       return await handleSubmitSurveyResponse(pathParams.sessionId, caller!.userId, event.body);
@@ -39,7 +38,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     // GET /survey-templates
     if (method === "GET" && !pathParams?.surveyTemplateId) {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["faculty", "admin"]);
       if (authError) return authError;
       return await handleListTemplates();
@@ -52,7 +51,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     // POST /survey-templates
     if (method === "POST") {
-      const caller = extractCallerIdentity(event);
+      const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["faculty", "admin"]);
       if (authError) return authError;
       return await handleCreateTemplate(caller!.role, event.body);

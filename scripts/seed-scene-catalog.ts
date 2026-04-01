@@ -1,6 +1,6 @@
 /**
  * Seed script for SceneCatalog table.
- * Maps the existing task1/task2/task3 simulation levels to scene records.
+ * Seeds reusable scene metadata and Unity build references.
  *
  * Usage (after deployment):
  *   npx tsx scripts/seed-scene-catalog.ts
@@ -11,7 +11,6 @@
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
-
 const TABLE_NAME = process.env.TABLE_NAME || process.env.SCENE_CATALOG_TABLE_NAME;
 
 if (!TABLE_NAME) {

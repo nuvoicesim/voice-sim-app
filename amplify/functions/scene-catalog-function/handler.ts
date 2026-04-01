@@ -14,11 +14,11 @@ import {
   putItem,
   generateId,
   generateTimestamp,
-  queryItems,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
 
 const TABLE_NAME = process.env.TABLE_NAME;
+const UNITY_BUILD_TABLE_NAME = process.env.UNITY_BUILD_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -28,6 +28,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   try {
     if (method === "GET") {
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
+      if (authError) return authError;
       const params = getQueryParams(event.queryStringParameters);
       if (params.sceneId) {
         return await handleGetScene(params.sceneId);
@@ -36,15 +39,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     if (method === "POST") {
-      const caller = extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleCreateScene(event.body);
     }
 
     if (method === "PUT") {
-      const caller = extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
       const sceneId = event.pathParameters?.sceneId;
       if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
@@ -52,8 +55,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     if (method === "DELETE") {
-      const caller = extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
       const sceneId = event.pathParameters?.sceneId;
       if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
@@ -85,10 +88,20 @@ async function handleListScenes() {
 
 async function handleCreateScene(body: string | null) {
   const payload = parseJsonBody(body);
-  const { scenarioKey, title, description, difficulty, tags, unityBuildFolder } = payload;
+  const { scenarioKey, title, description, difficulty, tags, unityBuildId, unityBuildFolder } = payload;
 
   if (!scenarioKey || !title) {
     return badRequestResponse("Missing required fields: scenarioKey, title");
+  }
+
+  if (unityBuildId && UNITY_BUILD_TABLE_NAME) {
+    const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId }, dynamo);
+    if (!unityBuild) {
+      return badRequestResponse("unityBuildId does not reference an existing Unity build");
+    }
+    if (unityBuild.status !== "published") {
+      return badRequestResponse("Scenes can only link published Unity builds");
+    }
   }
 
   const now = generateTimestamp();
@@ -99,6 +112,7 @@ async function handleCreateScene(body: string | null) {
     description: description || "",
     difficulty: difficulty || "medium",
     tags: tags || [],
+    unityBuildId: unityBuildId || null,
     unityBuildFolder: unityBuildFolder || "",
     isActive: true,
     createdAt: now,
@@ -114,6 +128,15 @@ async function handleUpdateScene(sceneId: string, body: string | null) {
   if (!existing) return notFoundResponse("Scene not found");
 
   const payload = parseJsonBody(body);
+  if (payload.unityBuildId && UNITY_BUILD_TABLE_NAME) {
+    const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId: payload.unityBuildId }, dynamo);
+    if (!unityBuild) {
+      return badRequestResponse("unityBuildId does not reference an existing Unity build");
+    }
+    if (unityBuild.status !== "published") {
+      return badRequestResponse("Scenes can only link published Unity builds");
+    }
+  }
   const updated = {
     ...existing,
     ...payload,
