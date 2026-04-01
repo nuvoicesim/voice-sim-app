@@ -1,18 +1,17 @@
 import type { TtsVoiceProfile } from "./validation";
 
 export type ValidationMode = "lenient" | "strict";
-type SimulationLevel = 1 | 2 | 3;
+
+export interface VoicePolicyOptions {
+  mode: ValidationMode;
+  enforcedVoiceId?: string;
+  enforcedModelId?: string;
+}
 
 export interface VoicePolicyResult {
   effectiveProfile: TtsVoiceProfile;
   adjustedFields: string[];
 }
-
-const SIMULATION_LEVEL_VOICE_ID_MAP: Record<SimulationLevel, string> = {
-  1: "QXFI3J7JB0fOlMwKDUxE",
-  2: "KjIBD4QnlzAqKHmoYfdZ",
-  3: "nlPFgtYJ0K18Hij3YdiX",
-};
 
 const DEFAULT_PROFILE: Required<
   Pick<TtsVoiceProfile, "modelId" | "stability" | "similarityBoost" | "styleExaggeration" | "speed">
@@ -30,16 +29,17 @@ function clamp(value: number, min: number, max: number): number {
 
 export function applyVoicePolicy(
   voiceProfile: TtsVoiceProfile,
-  simulationLevel: SimulationLevel,
-  mode: ValidationMode
+  options: VoicePolicyOptions
 ): VoicePolicyResult {
   const adjustedFields: string[] = [];
-  const mappedVoiceId = SIMULATION_LEVEL_VOICE_ID_MAP[simulationLevel];
+  const mappedVoiceId =
+    options.enforcedVoiceId
+    || voiceProfile.voiceId;
 
   const effectiveProfile: TtsVoiceProfile = {
     ...voiceProfile,
     voiceId: mappedVoiceId,
-    modelId: voiceProfile.modelId || DEFAULT_PROFILE.modelId,
+    modelId: options.enforcedModelId || voiceProfile.modelId || DEFAULT_PROFILE.modelId,
   };
 
   if (voiceProfile.voiceId !== mappedVoiceId) {
@@ -60,7 +60,7 @@ export function applyVoicePolicy(
     }
 
     if (value < min || value > max) {
-      if (mode === "lenient") {
+      if (options.mode === "lenient") {
         effectiveProfile[key] = clamp(value, min, max);
         adjustedFields.push(key);
       }
@@ -75,7 +75,7 @@ export function applyVoicePolicy(
     effectiveProfile.speed = DEFAULT_PROFILE.speed;
     adjustedFields.push("speed");
   } else if (effectiveProfile.speed < 0.7 || effectiveProfile.speed > 1.2) {
-    if (mode === "lenient") {
+    if (options.mode === "lenient") {
       effectiveProfile.speed = clamp(effectiveProfile.speed, 0.7, 1.2);
       adjustedFields.push("speed");
     }

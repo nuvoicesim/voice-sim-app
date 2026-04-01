@@ -6,14 +6,19 @@ import {
   parseJsonBody,
   HTTP_STATUS,
   buildCorsHeaders,
+  requireRuntimeTokenClaims,
+  applyRuntimeClaimsToBody,
+  RuntimeTokenError,
+  resolveRuntimeConfig,
 } from "../shared";
 import { validateTtsRequest } from "./validation";
 import { applyVoicePolicy, type ValidationMode } from "./voicePolicy";
 import { synthesizeWithElevenLabs, ElevenLabsUpstreamError } from "./providers/elevenlabs";
-import { resolveScenarioKey, ContextResolutionError, createDynamoDbClient } from "../shared";
+import { ContextResolutionError, createDynamoDbClient } from "../shared";
 
 const ASSIGNMENT_TABLE_NAME = process.env.ASSIGNMENT_TABLE_NAME;
 const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
+const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 const ELEVENLABS_API_KEY_RAW = process.env.ELEVENLABS_API_KEY;
@@ -21,6 +26,7 @@ const ALLOWED_ORIGINS = process.env.TTS_ALLOWED_ORIGINS ?? process.env.LLM_ALLOW
 const TTS_TIMEOUT_MS = Number(process.env.TTS_TIMEOUT_MS ?? "20000");
 const TTS_MAX_INPUT_CHARS = Number(process.env.TTS_MAX_INPUT_CHARS ?? "800");
 const TTS_VALIDATION_MODE = (process.env.TTS_VALIDATION_MODE ?? "lenient") as ValidationMode;
+const RUNTIME_TOKEN_SECRET = process.env.RUNTIME_TOKEN_SECRET ?? "";
 
 function getHeaderValue(
   headers: Record<string, string | undefined> | undefined,
@@ -143,6 +149,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  try {
+    const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+    payload = applyRuntimeClaimsToBody((payload as Record<string, unknown>) ?? {}, runtimeClaims);
+  } catch (error) {
+    if (error instanceof RuntimeTokenError) {
+      return respond(error.statusCode, {
+        error: error.message,
+        requestId,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+
   const validation = validateTtsRequest(payload, { maxTextChars: TTS_MAX_INPUT_CHARS });
   if (!validation.request) {
     return respond(HTTP_STATUS.BAD_REQUEST, {
@@ -154,31 +174,45 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   const request = validation.request;
 
-  // Resolve simulationLevel from context if using new flow
-  let effectiveSimLevel = request.simulationLevel;
-  if (!effectiveSimLevel && request.context) {
-    try {
-      const resolved = await resolveScenarioKey(
-        { context: request.context },
-        ASSIGNMENT_TABLE_NAME || "",
-        SCENE_CATALOG_TABLE_NAME || "",
-        dynamo
-      );
-      const scenarioToLevel: Record<string, 1 | 2 | 3> = { task1: 1, task2: 2, task3: 3 };
-      effectiveSimLevel = scenarioToLevel[resolved.scenarioKey] || 1;
-    } catch (error) {
-      if (error instanceof ContextResolutionError) {
-        return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
-      }
-      effectiveSimLevel = 1;
+  let runtimeConfig;
+  try {
+    runtimeConfig = await resolveRuntimeConfig(
+      { context: request.context },
+      ASSIGNMENT_TABLE_NAME || "",
+      SCENE_CATALOG_TABLE_NAME || "",
+      PATIENT_PROFILE_TABLE_NAME || "",
+      dynamo
+    );
+  } catch (error) {
+    if (error instanceof ContextResolutionError) {
+      return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
     }
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+      error: "Context resolution failed",
+      requestId,
+      retryable: false,
+    });
   }
 
+  const assignmentTtsConfig = runtimeConfig?.tts;
+  const requestedProfile = assignmentTtsConfig || {};
+
   const { effectiveProfile, adjustedFields } = applyVoicePolicy(
-    request.voiceProfile,
-    effectiveSimLevel || 1,
-    TTS_VALIDATION_MODE
+    requestedProfile,
+    {
+      mode: TTS_VALIDATION_MODE,
+      enforcedVoiceId: assignmentTtsConfig?.voiceId,
+      enforcedModelId: assignmentTtsConfig?.modelId,
+    }
   );
+
+  if (!effectiveProfile.voiceId) {
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+      error: "TTS runtime config is missing a voiceId for this assignment",
+      requestId,
+      retryable: false,
+    });
+  }
 
   if (TTS_VALIDATION_MODE === "strict" && adjustedFields.length > 0) {
     return respond(HTTP_STATUS.BAD_REQUEST, {
@@ -214,9 +248,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     console.log("tts request completed", {
       requestId,
       userID: request.userID,
-      simulationLevel: request.simulationLevel,
-      scenario: request.scenario,
-      profileId: request.voiceProfile.profileId,
+      context: request.context,
+      scenario: runtimeConfig?.scenarioKey,
+      profileId: effectiveProfile.profileId,
       provider: "elevenlabs",
       latencyMs,
       outcome: "success",
@@ -239,9 +273,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     console.error("tts upstream error", {
       requestId,
       userID: request.userID,
-      simulationLevel: request.simulationLevel,
-      scenario: request.scenario,
-      profileId: request.voiceProfile.profileId,
+      context: request.context,
+      scenario: runtimeConfig?.scenarioKey,
+      profileId: effectiveProfile.profileId,
       provider: "elevenlabs",
       outcome: "error",
       statusCode: mapped.statusCode,
