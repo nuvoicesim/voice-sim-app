@@ -9,6 +9,7 @@ import {
   IconTag, IconDeviceGamepad2, IconAlertTriangle,
 } from '@tabler/icons-react';
 import { sceneCatalogApi } from '../../api/sceneCatalogApi';
+import { unityBuildApi, type UnityBuild } from '../../api/unityBuildApi';
 
 interface Scene {
   sceneId: string;
@@ -17,6 +18,7 @@ interface Scene {
   description: string;
   difficulty: string;
   tags: string[];
+  unityBuildId?: string | null;
   unityBuildFolder: string;
   isActive: boolean;
   createdAt: string;
@@ -27,10 +29,6 @@ const DIFFICULTY_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
   { value: 'intermediate', label: 'Intermediate' },
   { value: 'advanced', label: 'Advanced' },
-];
-
-const UNITY_BUILD_OPTIONS = [
-  { value: 'broca-aphasia-webgl', label: 'Broca Aphasia (broca-aphasia-webgl)' },
 ];
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -51,15 +49,17 @@ const EMPTY_FORM = {
   description: '',
   difficulty: 'intermediate',
   tags: '',
-  unityBuildFolder: 'broca-aphasia-webgl',
+  unityBuildId: '',
 };
 
 function SceneCard({
   scene,
+  unityBuildLabel,
   onEdit,
   onDelete,
 }: {
   scene: Scene;
+  unityBuildLabel: string;
   onEdit: (s: Scene) => void;
   onDelete: (s: Scene) => void;
 }) {
@@ -117,7 +117,7 @@ function SceneCard({
             <Group gap={5}>
               <IconDeviceGamepad2 size={13} style={{ color: 'var(--mantine-color-gray-5)' }} />
               <Text size="xs" c="dimmed">
-                {scene.unityBuildFolder || 'No game linked'}
+                {unityBuildLabel}
               </Text>
             </Group>
             <Badge color={diffColor} variant="filled" size="xs" radius="xl">
@@ -195,6 +195,7 @@ function EmptyState() {
 
 export default function SceneManagement() {
   const [scenes, setScenes] = useState<Scene[]>([]);
+  const [unityBuilds, setUnityBuilds] = useState<UnityBuild[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -208,10 +209,15 @@ export default function SceneManagement() {
     setLoading(true);
     setError(null);
     try {
-      const data = await sceneCatalogApi.list();
+      const [sceneData, unityBuildData] = await Promise.all([
+        sceneCatalogApi.list(),
+        unityBuildApi.list(),
+      ]);
+      setUnityBuilds(unityBuildData.unityBuilds || []);
+      const data = sceneData;
       setScenes(data.scenes || []);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load scenes');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load scenes');
     } finally {
       setLoading(false);
     }
@@ -233,13 +239,17 @@ export default function SceneManagement() {
       description: scene.description || '',
       difficulty: scene.difficulty || 'intermediate',
       tags: Array.isArray(scene.tags) ? scene.tags.join(', ') : '',
-      unityBuildFolder: scene.unityBuildFolder || 'broca-aphasia-webgl',
+      unityBuildId: scene.unityBuildId || '',
     });
     setModalOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.scenarioKey || !form.title) return;
+    if (!form.unityBuildId) {
+      setError('Scenes must reference a published Unity build.');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -248,7 +258,7 @@ export default function SceneManagement() {
         description: form.description,
         difficulty: form.difficulty,
         tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
-        unityBuildFolder: form.unityBuildFolder,
+        unityBuildId: form.unityBuildId || null,
       };
       if (editingScene) {
         await sceneCatalogApi.update(editingScene.sceneId, payload);
@@ -257,8 +267,8 @@ export default function SceneManagement() {
       }
       setModalOpen(false);
       await loadScenes();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to save scene');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save scene');
     } finally {
       setSaving(false);
     }
@@ -271,12 +281,19 @@ export default function SceneManagement() {
       await sceneCatalogApi.delete(deleteTarget.sceneId);
       setDeleteTarget(null);
       await loadScenes();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to delete scene');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete scene');
     } finally {
       setDeleting(false);
     }
   };
+
+  const unityBuildLabelById = new Map(
+    unityBuilds.map((unityBuild) => [
+      unityBuild.unityBuildId,
+      `${unityBuild.displayName} (${unityBuild.buildKey})`,
+    ])
+  );
 
   return (
     <Stack gap="xl">
@@ -328,6 +345,10 @@ export default function SceneManagement() {
             <SceneCard
               key={s.sceneId}
               scene={s}
+              unityBuildLabel={
+                (s.unityBuildId && unityBuildLabelById.get(s.unityBuildId))
+                || 'No published Unity build'
+              }
               onEdit={openEdit}
               onDelete={setDeleteTarget}
             />
@@ -384,14 +405,19 @@ export default function SceneManagement() {
             radius="md"
           />
           <Select
-            label="Unity Build Folder"
-            description="Select the Unity WebGL game to bind to this scene"
-            placeholder="Select a Unity game"
-            data={UNITY_BUILD_OPTIONS}
-            value={form.unityBuildFolder}
-            onChange={(v) => setForm((prev) => ({ ...prev, unityBuildFolder: v || '' }))}
-            clearable
+            label="Unity Build"
+            description="Select the published Unity WebGL build to bind to this scene"
+            placeholder="Select a Unity build"
+            data={unityBuilds
+              .filter((unityBuild) => unityBuild.status === 'published')
+              .map((unityBuild) => ({
+                value: unityBuild.unityBuildId,
+                label: `${unityBuild.displayName} (${unityBuild.buildKey})`,
+              }))}
+            value={form.unityBuildId}
+            onChange={(value) => setForm((prev) => ({ ...prev, unityBuildId: value || '' }))}
             radius="md"
+            required
           />
           <TextInput
             label="Tags"

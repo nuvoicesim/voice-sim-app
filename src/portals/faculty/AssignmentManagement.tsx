@@ -3,12 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Title, Text, Badge, Button, Stack, Group, Center, Box,
-  Paper, ThemeIcon, Skeleton, SegmentedControl, Menu,
+  Paper, ThemeIcon, Skeleton, SegmentedControl, Menu, Modal,
 } from '@mantine/core';
 import {
   IconClipboardList, IconPlus, IconRocket, IconArchive,
   IconPencil, IconCalendar, IconBook2, IconClipboardCheck,
-  IconInbox, IconDotsVertical,
+  IconInbox, IconDotsVertical, IconTrash,
 } from '@tabler/icons-react';
 import { fetchAssignments, selectAssignments, selectAssignmentsLoading } from '../../slices/assignmentSlice';
 import { assignmentApi } from '../../api/assignmentApi';
@@ -29,9 +29,13 @@ const MODE_CONFIG: Record<string, { color: string; icon: typeof IconBook2; label
 function AssignmentRow({
   assignment,
   onStatusChange,
+  onEdit,
+  onDelete,
 }: {
   assignment: Assignment;
   onStatusChange: (id: string, status: string) => void;
+  onEdit: (id: string) => void;
+  onDelete: (assignment: Assignment) => void;
 }) {
   const status = STATUS_CONFIG[assignment.status] ?? STATUS_CONFIG.draft;
   const mode = MODE_CONFIG[assignment.mode] ?? MODE_CONFIG.practice;
@@ -88,6 +92,12 @@ function AssignmentRow({
             </ThemeIcon>
           </Menu.Target>
           <Menu.Dropdown>
+            <Menu.Item
+              leftSection={<IconPencil size={14} />}
+              onClick={() => onEdit(assignment.assignmentId)}
+            >
+              Edit
+            </Menu.Item>
             {assignment.status === 'draft' && (
               <Menu.Item
                 leftSection={<IconRocket size={14} />}
@@ -113,6 +123,13 @@ function AssignmentRow({
                 Move to Draft
               </Menu.Item>
             )}
+            <Menu.Item
+              leftSection={<IconTrash size={14} />}
+              color="red"
+              onClick={() => onDelete(assignment)}
+            >
+              Delete
+            </Menu.Item>
           </Menu.Dropdown>
         </Menu>
       </Group>
@@ -170,9 +187,13 @@ function EmptyState() {
 export default function AssignmentManagement() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
+  const createAssignmentPath = '/faculty/assignments/new';
+  const assignmentEditBasePath = '/faculty/assignments';
   const assignments = useSelector(selectAssignments);
   const loading = useSelector(selectAssignmentsLoading);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [deleteTarget, setDeleteTarget] = useState<Assignment | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     dispatch(fetchAssignments());
@@ -181,6 +202,22 @@ export default function AssignmentManagement() {
   const handleStatusChange = async (assignmentId: string, status: string) => {
     await assignmentApi.updateStatus(assignmentId, status);
     dispatch(fetchAssignments());
+  };
+
+  const handleEdit = (assignmentId: string) => {
+    navigate(`${assignmentEditBasePath}/${assignmentId}/edit`);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await assignmentApi.delete(deleteTarget.assignmentId);
+      setDeleteTarget(null);
+      dispatch(fetchAssignments());
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const filtered = statusFilter === 'all'
@@ -211,7 +248,7 @@ export default function AssignmentManagement() {
           leftSection={<IconPlus size={16} />}
           variant="gradient"
           gradient={{ from: 'indigo', to: 'violet' }}
-          onClick={() => navigate('/faculty/assignments/new')}
+          onClick={() => navigate(createAssignmentPath)}
         >
           New Assignment
         </Button>
@@ -253,10 +290,35 @@ export default function AssignmentManagement() {
               key={a.assignmentId}
               assignment={a}
               onStatusChange={handleStatusChange}
+              onEdit={handleEdit}
+              onDelete={setDeleteTarget}
             />
           ))}
         </Stack>
       )}
+
+      <Modal
+        opened={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Assignment"
+        size="sm"
+        radius="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Delete <b>{deleteTarget?.title}</b>? This will archive the assignment and remove it from active use,
+            but keep historical session data intact.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="subtle" color="gray" radius="md" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button color="red" radius="md" onClick={handleDelete} loading={deleting}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

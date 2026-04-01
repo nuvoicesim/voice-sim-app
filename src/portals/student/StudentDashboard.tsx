@@ -41,6 +41,13 @@ function formatDueRelative(dateStr: string): { text: string; urgent: boolean } {
   };
 }
 
+function getAssignmentLabel(
+  assignmentMap: Map<string, { title: string }>,
+  assignmentId: string
+): string {
+  return assignmentMap.get(assignmentId)?.title || 'Archived assignment';
+}
+
 function StatCard({
   label, value, icon: Icon, color, bgGradient, borderColor,
 }: {
@@ -322,7 +329,7 @@ export default function StudentDashboard() {
               {recentSessions.map((s) => {
                 const modeConf = MODE_CONFIG[s.mode] ?? MODE_CONFIG.practice;
                 const ModeIcon = modeConf.icon;
-                const assignmentTitle = assignmentMap.get(s.assignmentId)?.title || s.assignmentId;
+                const assignmentTitle = getAssignmentLabel(assignmentMap, s.assignmentId);
                 return (
                   <Paper
                     key={s.sessionId}

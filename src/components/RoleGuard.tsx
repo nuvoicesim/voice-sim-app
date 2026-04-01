@@ -18,6 +18,7 @@ export default function RoleGuard({ allowedRoles, children }: RoleGuardProps) {
     const redirectMap: Record<UserRole, string> = {
       student: '/student/dashboard',
       faculty: '/faculty/dashboard',
+      simulation_designer: '/simulation-designer/patient-profiles',
       admin: '/admin/dashboard',
     };
     return <Navigate to={redirectMap[role]} replace />;

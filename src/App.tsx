@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { Box } from '@mantine/core';
 import TopBar from './TopBar';
@@ -29,6 +29,8 @@ import AssignmentManagement from './portals/faculty/AssignmentManagement';
 import StudentsDataPage from './portals/faculty/StudentsDataPage';
 import AnalysisPage from './portals/faculty/AnalysisPage';
 import SceneManagement from './portals/faculty/SceneManagement';
+import PatientProfilesPage from './portals/simulation-designer/PatientProfilesPage';
+import UnityBuildsPage from './portals/simulation-designer/UnityBuildsPage';
 
 // Admin portal
 import AdminDashboard from './portals/admin/AdminDashboard';
@@ -38,12 +40,14 @@ import GlobalAnalyticsPage from './portals/admin/GlobalAnalyticsPage';
 const PORTAL_HOME: Record<UserRole, string> = {
   student: '/student/dashboard',
   faculty: '/faculty/dashboard',
+  simulation_designer: '/simulation-designer/patient-profiles',
   admin: '/admin/dashboard',
 };
 
 function App() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signOut } = useAuthenticator();
   const role = useSelector(selectRole);
 
@@ -55,18 +59,21 @@ function App() {
 
       const attrs = await fetchUserAttributes();
       const userRole = (attrs['custom:role'] as UserRole) || 'student';
+      const userId = attrs.sub || user.username;
 
       dispatch(setAuth({
-        userId: user.username,
+        userId,
         email: attrs.email,
         role: userRole,
       }));
 
-      navigate(PORTAL_HOME[userRole]);
+      if (location.pathname === '/') {
+        navigate(PORTAL_HOME[userRole], { replace: true });
+      }
     };
 
     loadUserData();
-  }, [user?.username, dispatch]);
+  }, [user?.username, dispatch, navigate, location.pathname]);
 
   return (
     <Box style={{ background: '#f8f9fa', minHeight: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
@@ -99,11 +106,25 @@ function App() {
                 <Routes>
                   <Route path="dashboard" element={<FacultyDashboard />} />
                   <Route path="assignments/new" element={<CreateAssignment />} />
+                  <Route path="assignments/:assignmentId/edit" element={<CreateAssignment />} />
                   <Route path="assignments" element={<AssignmentManagement />} />
-                  <Route path="scenes" element={<SceneManagement />} />
                   <Route path="students" element={<StudentsDataPage />} />
                   <Route path="analysis" element={<AnalysisPage />} />
                   <Route path="*" element={<Navigate to="dashboard" replace />} />
+                </Routes>
+              </PortalLayout>
+            </RoleGuard>
+          } />
+
+          <Route path="/simulation-designer/*" element={
+            <RoleGuard allowedRoles={['simulation_designer', 'admin']}>
+              <PortalLayout role="simulation_designer">
+                <Routes>
+                  <Route path="patient-profiles" element={<PatientProfilesPage />} />
+                  <Route path="unity-builds" element={<UnityBuildsPage />} />
+                  <Route path="scenes" element={<SceneManagement />} />
+                  <Route path="dashboard" element={<Navigate to="/simulation-designer/patient-profiles" replace />} />
+                  <Route path="*" element={<Navigate to="patient-profiles" replace />} />
                 </Routes>
               </PortalLayout>
             </RoleGuard>

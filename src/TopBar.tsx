@@ -13,12 +13,14 @@ interface TopBarProps {
 const ROLE_LABELS: Record<UserRole, string> = {
   student: 'Student',
   faculty: 'Faculty',
+  simulation_designer: 'Simulation Designer',
   admin: 'Admin',
 };
 
 const ROLE_COLORS: Record<UserRole, string> = {
   student: 'cyan',
   faculty: 'violet',
+  simulation_designer: 'teal',
   admin: 'pink',
 };
 
@@ -49,6 +51,7 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
     const portalMap: Record<UserRole, string> = {
       student: '/student/dashboard',
       faculty: '/faculty/dashboard',
+      simulation_designer: '/simulation-designer/patient-profiles',
       admin: '/admin/dashboard',
     };
     navigate(portalMap[role]);
@@ -113,6 +116,13 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
                 onClick={() => navigate('/faculty/dashboard')}
               >
                 Faculty
+              </Button>
+              <Button
+                size="compact-xs" variant="subtle" c="white" radius="xl"
+                style={{ opacity: 0.8 }}
+                onClick={() => navigate('/simulation-designer/patient-profiles')}
+              >
+                Designer
               </Button>
             </Group>
           </>

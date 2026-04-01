@@ -4,6 +4,7 @@ import { assignmentApi } from "../api/assignmentApi";
 export interface Assignment {
   assignmentId: string;
   sceneId: string;
+  patientProfileId: string;
   title: string;
   description?: string;
   mode: "practice" | "assessment";

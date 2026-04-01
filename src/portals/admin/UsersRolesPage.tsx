@@ -19,6 +19,7 @@ interface CognitoUser {
 const ROLE_COLORS: Record<string, string> = {
   student: 'blue',
   faculty: 'violet',
+  simulation_designer: 'teal',
   admin: 'red',
 };
 
@@ -94,6 +95,7 @@ function UserRow({
           data={[
             { value: 'student', label: 'Student' },
             { value: 'faculty', label: 'Faculty' },
+            { value: 'simulation_designer', label: 'Simulation Designer' },
             { value: 'admin', label: 'Admin' },
           ]}
           value={currentRole}
@@ -152,7 +154,7 @@ export default function UsersRolesPage() {
   const handleRoleChange = async (userId: string, newRole: string) => {
     setUpdating(userId);
     try {
-      await apiPut(`/cognito-user/${userId}/role`, { role: newRole, callerRole: 'admin' });
+      await apiPut(`/cognito-user/${userId}/role`, { role: newRole });
       await loadUsers();
     } catch (e) {
       console.error('Failed to update role', e);
@@ -215,6 +217,9 @@ export default function UsersRolesPage() {
           </Badge>
           <Badge variant="light" color="violet" size="lg" radius="xl">
             {users.filter((u) => u.attributes?.['custom:role'] === 'faculty').length} faculty
+          </Badge>
+          <Badge variant="light" color="teal" size="lg" radius="xl">
+            {users.filter((u) => u.attributes?.['custom:role'] === 'simulation_designer').length} simulation designers
           </Badge>
           <Badge variant="light" color="red" size="lg" radius="xl">
             {users.filter((u) => u.attributes?.['custom:role'] === 'admin').length} admins

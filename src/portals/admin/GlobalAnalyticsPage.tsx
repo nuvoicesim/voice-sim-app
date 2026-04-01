@@ -5,7 +5,7 @@ import {
 } from '@mantine/core';
 import {
   IconChartPie, IconClipboardList, IconActivity, IconCircleCheck,
-  IconUsers, IconMessage, IconMessageCheck,
+  IconUsers,
 } from '@tabler/icons-react';
 import { analyticsApi } from '../../api/analyticsApi';
 
@@ -64,17 +64,15 @@ function LoadingSkeleton() {
 
 export default function GlobalAnalyticsPage() {
   const [platform, setPlatform] = useState<any>(null);
-  const [surveys, setSurveys] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      analyticsApi.platform(),
-      analyticsApi.surveys(),
-    ]).then(([p, s]) => {
-      setPlatform(p);
-      setSurveys(s);
-    }).catch(console.error).finally(() => setLoading(false));
+    analyticsApi.platform()
+      .then((p) => {
+        setPlatform(p);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <LoadingSkeleton />;
@@ -134,34 +132,6 @@ export default function GlobalAnalyticsPage() {
             color="violet"
             bgGradient="linear-gradient(135deg, #f5f0ff 0%, #ede5ff 100%)"
             borderColor="#ddd0ff"
-          />
-        </SimpleGrid>
-      </Paper>
-
-      {/* ── Survey metrics ── */}
-      <Paper radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
-        <Group gap="xs" mb="lg">
-          <ThemeIcon size={26} radius="xl" variant="light" color="orange">
-            <IconMessage size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Survey Metrics</Text>
-        </Group>
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-          <StatCard
-            label="Responses"
-            value={surveys?.totalResponses ?? 0}
-            icon={IconMessage}
-            color="orange"
-            bgGradient="linear-gradient(135deg, #fff7f0 0%, #fff0e6 100%)"
-            borderColor="#ffdfc4"
-          />
-          <StatCard
-            label="Completed Surveys"
-            value={surveys?.completedResponses ?? 0}
-            icon={IconMessageCheck}
-            color="green"
-            bgGradient="linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%)"
-            borderColor="#c6f6d5"
           />
         </SimpleGrid>
       </Paper>

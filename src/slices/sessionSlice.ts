@@ -6,6 +6,10 @@ export interface Session {
   assignmentId: string;
   studentUserId: string;
   attemptNo: number;
+  sceneId?: string;
+  unityBuildId?: string | null;
+  unityLaunchUrl?: string | null;
+  unityBuildFolder?: string | null;
   mode: string;
   status: "active" | "completed" | "abandoned";
   startedAt: string;
@@ -28,7 +32,7 @@ export interface SessionEvaluation {
   sessionId: string;
   totalScore: number;
   performanceLevel: string;
-  rubric: any[];
+  rubric: unknown[];
   responseTimeAvgSec: number;
   overallExplanation: string;
   createdAt: string;
@@ -68,8 +72,8 @@ export const fetchSession = createAsyncThunk(
 
 export const completeSession = createAsyncThunk(
   "sessions/complete",
-  async (sessionId: string) => {
-    return await sessionApi.complete(sessionId);
+  async ({ sessionId, runtimeToken }: { sessionId: string; runtimeToken: string }) => {
+    return await sessionApi.complete(sessionId, runtimeToken);
   }
 );
 

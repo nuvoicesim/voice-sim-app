@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   IconLayoutDashboard, IconRocket, IconHistory,
   IconMovie, IconFilePlus, IconClipboardList, IconUsers, IconChartBar,
-  IconUserCog, IconChartPie,
+  IconUserCog, IconChartPie, IconUserStar, IconCloudUpload,
 } from '@tabler/icons-react';
 import type { UserRole } from '../slices/authSlice';
 
@@ -21,11 +21,15 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
   ],
   faculty: [
     { label: 'Dashboard', path: '/faculty/dashboard', icon: IconLayoutDashboard },
-    { label: 'Manage Scenes', path: '/faculty/scenes', icon: IconMovie },
     { label: 'Create Assignment', path: '/faculty/assignments/new', icon: IconFilePlus },
     { label: 'Manage Assignments', path: '/faculty/assignments', icon: IconClipboardList },
     { label: 'Student Data', path: '/faculty/students', icon: IconUsers },
     { label: 'Analysis', path: '/faculty/analysis', icon: IconChartBar },
+  ],
+  simulation_designer: [
+    { label: 'Patient Profiles', path: '/simulation-designer/patient-profiles', icon: IconUserStar },
+    { label: 'Unity Builds', path: '/simulation-designer/unity-builds', icon: IconCloudUpload },
+    { label: 'Manage Scenes', path: '/simulation-designer/scenes', icon: IconMovie },
   ],
   admin: [
     { label: 'Dashboard', path: '/admin/dashboard', icon: IconLayoutDashboard },
@@ -44,6 +48,11 @@ const ROLE_META: Record<UserRole, { label: string; color: string; gradient: stri
     label: 'Faculty Portal',
     color: 'violet',
     gradient: 'linear-gradient(135deg, #a855f7 0%, #6366f1 100%)',
+  },
+  simulation_designer: {
+    label: 'Simulation Designer Portal',
+    color: 'teal',
+    gradient: 'linear-gradient(135deg, #14b8a6 0%, #0f766e 100%)',
   },
   admin: {
     label: 'Admin Portal',

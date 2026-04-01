@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Title, Text, Paper, Stack, Badge, Center, Group, Box,
-  ThemeIcon, SimpleGrid, Skeleton, Button, RingProgress,
+  ThemeIcon, SimpleGrid, Skeleton, Button,
 } from '@mantine/core';
 import {
   IconFileAnalytics, IconArrowLeft, IconHash, IconBook2,
@@ -54,14 +54,6 @@ function formatDuration(start: string, end: string | null): string {
   const m = Math.floor(sec / 60);
   if (m < 60) return `${m}m ${sec % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-function scoreToColor(score: number): string {
-  if (score >= 90) return 'teal';
-  if (score >= 75) return 'green';
-  if (score >= 60) return 'blue';
-  if (score >= 40) return 'orange';
-  return 'red';
 }
 
 function ConversationBubble({ turn }: { turn: SessionTurn }) {
@@ -176,7 +168,6 @@ export default function SessionDetailPage() {
   const perfColor = evaluation
     ? PERF_COLORS[evaluation.performanceLevel.toLowerCase()] || 'gray'
     : 'gray';
-  const sColor = evaluation ? scoreToColor(evaluation.totalScore) : 'gray';
 
   return (
     <Stack gap="xl">
@@ -227,20 +218,9 @@ export default function SessionDetailPage() {
 
           {evaluation ? (
             <Stack align="center" gap="md">
-              <RingProgress
-                size={140}
-                thickness={12}
-                roundCaps
-                sections={[{ value: evaluation.totalScore, color: `var(--mantine-color-${sColor}-6)` }]}
-                label={
-                  <Stack align="center" gap={0}>
-                    <Text fw={800} size="xl" c={`${sColor}.7`}>
-                      {evaluation.totalScore}
-                    </Text>
-                    <Text size="xs" c="dimmed">/ 100</Text>
-                  </Stack>
-                }
-              />
+              <ThemeIcon size={54} radius="xl" variant="light" color={perfColor}>
+                <IconTrophy size={26} />
+              </ThemeIcon>
               <Badge variant="light" color={perfColor} size="lg" radius="xl">
                 <Group gap={4}>
                   <IconStarFilled size={12} />

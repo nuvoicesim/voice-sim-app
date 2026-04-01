@@ -3,23 +3,17 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
   Title, Text, Badge, Button, Center, Stack, Group,
-  Paper, TextInput, SegmentedControl, SimpleGrid, Box,
+  Paper, TextInput, SegmentedControl, SimpleGrid, Box, Alert,
   ThemeIcon, Skeleton,
 } from '@mantine/core';
 import {
   IconSearch, IconRocket, IconBook2, IconClipboardCheck,
-  IconCalendar, IconRepeat, IconInbox, IconPlayerPlay,
+  IconCalendar, IconRepeat, IconInbox, IconPlayerPlay, IconAlertCircle,
 } from '@tabler/icons-react';
 import { fetchAssignments, selectAssignments, selectAssignmentsLoading } from '../../slices/assignmentSlice';
 import { startSession } from '../../slices/sessionSlice';
-import { sceneCatalogApi } from '../../api/sceneCatalogApi';
 import type { AppDispatch } from '../../store';
 import type { Assignment } from '../../slices/assignmentSlice';
-
-interface SceneInfo {
-  sceneId: string;
-  unityBuildFolder?: string;
-}
 
 const MODE_CONFIG: Record<string, {
   color: string;
@@ -64,7 +58,7 @@ function AssignmentCard({
   launching,
 }: {
   assignment: Assignment;
-  onLaunch: (assignmentId: string, sceneId: string) => void;
+  onLaunch: (assignmentId: string) => void;
   launching: string | null;
 }) {
   const modeConf = MODE_CONFIG[assignment.mode] ?? MODE_CONFIG.practice;
@@ -155,7 +149,7 @@ function AssignmentCard({
           radius="md"
           size="sm"
           rightSection={<IconPlayerPlay size={16} />}
-          onClick={() => onLaunch(assignment.assignmentId, assignment.sceneId)}
+          onClick={() => onLaunch(assignment.assignmentId)}
           loading={isLaunching}
         >
           Launch Simulation
@@ -234,21 +228,13 @@ export default function AssignmentsPage() {
   const navigate = useNavigate();
   const assignments = useSelector(selectAssignments);
   const loading = useSelector(selectAssignmentsLoading);
-  const [sceneMap, setSceneMap] = useState<Record<string, SceneInfo>>({});
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState('all');
   const [launching, setLaunching] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchAssignments({ status: 'published' }));
-    sceneCatalogApi.list().then((data) => {
-      const scenes = data.scenes || data.Items || [];
-      const map: Record<string, SceneInfo> = {};
-      for (const s of scenes) {
-        map[s.sceneId] = { sceneId: s.sceneId, unityBuildFolder: s.unityBuildFolder };
-      }
-      setSceneMap(map);
-    }).catch(() => {});
   }, [dispatch]);
 
   const filtered = useMemo(() => {
@@ -265,17 +251,19 @@ export default function AssignmentsPage() {
     return list;
   }, [assignments, modeFilter, search]);
 
-  const handleLaunch = async (assignmentId: string, sceneId: string) => {
+  const handleLaunch = async (assignmentId: string) => {
     setLaunching(assignmentId);
+    setLaunchError(null);
     try {
-      const result = await dispatch(startSession(assignmentId));
-      if (startSession.fulfilled.match(result)) {
-        const sessionId = result.payload.session.sessionId;
-        const scene = sceneMap[sceneId];
-        navigate(`/student/session/${sessionId}`, {
-          state: { unityBuildFolder: scene?.unityBuildFolder || null },
-        });
-      }
+      const result = await dispatch(startSession(assignmentId)).unwrap();
+      const sessionId = result.session.sessionId;
+      navigate(`/student/session/${sessionId}`, {
+        state: {
+          unityLaunchUrl: result.session.unityLaunchUrl || null,
+        },
+      });
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : 'Failed to launch simulation');
     } finally {
       setLaunching(null);
     }
@@ -298,6 +286,12 @@ export default function AssignmentsPage() {
           Launch simulations and track your learning progress
         </Text>
       </Box>
+
+      {launchError && (
+        <Alert color="red" radius="md" icon={<IconAlertCircle size={16} />}>
+          {launchError}
+        </Alert>
+      )}
 
       {/* ── Stats overview ── */}
       {!loading && assignments.length > 0 && (

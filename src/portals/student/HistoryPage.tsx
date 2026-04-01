@@ -52,6 +52,10 @@ function formatRelativeDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function getAssignmentLabel(assignmentMap: Map<string, string>, assignmentId: string): string {
+  return assignmentMap.get(assignmentId) || 'Archived assignment';
+}
+
 function SessionItem({
   session,
   assignmentTitle,
@@ -228,7 +232,7 @@ export default function HistoryPage() {
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((s) => {
-        const title = assignmentMap.get(s.assignmentId) || '';
+        const title = getAssignmentLabel(assignmentMap, s.assignmentId);
         return title.toLowerCase().includes(q);
       });
     }
@@ -381,7 +385,7 @@ export default function HistoryPage() {
             <SessionItem
               key={s.sessionId}
               session={s}
-              assignmentTitle={assignmentMap.get(s.assignmentId) || s.assignmentId}
+              assignmentTitle={getAssignmentLabel(assignmentMap, s.assignmentId)}
               onClick={() => navigate(`/student/session/${s.sessionId}/detail`)}
             />
           ))}
