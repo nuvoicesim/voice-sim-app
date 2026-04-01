@@ -123,6 +123,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleListProfiles(caller?.role);
     }
 
+    if (method === "POST" && event.resource?.includes("/archive")) {
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
+      if (authError) return authError;
+      const patientProfileId = pathParams?.patientProfileId;
+      if (!patientProfileId) return badRequestResponse("Missing patientProfileId path parameter");
+      return await handleArchiveProfile(patientProfileId);
+    }
+
     if (method === "POST") {
       const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
@@ -137,15 +145,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleUpdateProfile(patientProfileId, event.body);
     }
 
-    if (method === "DELETE") {
-      const authError = requireRole(caller, ["simulation_designer", "admin"]);
-      if (authError) return authError;
-      const patientProfileId = pathParams?.patientProfileId;
-      if (!patientProfileId) return badRequestResponse("Missing patientProfileId path parameter");
-      return await handleDeleteProfile(patientProfileId);
-    }
-
-    return methodNotAllowedResponse(["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+    return methodNotAllowedResponse(["GET", "POST", "PUT", "OPTIONS"]);
   } catch (error) {
     console.error("Unhandled error:", error);
     return serverErrorResponse("Internal server error");
@@ -217,7 +217,7 @@ async function handleUpdateProfile(patientProfileId: string, body: string | null
   return createResponse(HTTP_STATUS.OK, updated);
 }
 
-async function handleDeleteProfile(patientProfileId: string) {
+async function handleArchiveProfile(patientProfileId: string) {
   const existing = await getItem(TABLE_NAME, { patientProfileId }, dynamo);
   if (!existing) return notFoundResponse("Patient profile not found");
 

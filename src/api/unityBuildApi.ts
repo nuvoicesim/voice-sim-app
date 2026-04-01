@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
 
 export interface UnityBuild {
   unityBuildId: string;
@@ -58,6 +58,6 @@ export const unityBuildApi = {
   update: (unityBuildId: string, data: { displayName?: string; entryHtml?: string }) =>
     apiPut<UnityBuild>(`/unity-builds/${unityBuildId}`, data),
 
-  delete: (unityBuildId: string) =>
-    apiDelete(`/unity-builds/${unityBuildId}`),
+  archive: (unityBuildId: string) =>
+    apiPost(`/unity-builds/${unityBuildId}/archive`, {}),
 };

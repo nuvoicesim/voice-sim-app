@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
 
 export interface PatientProfilePayload {
   displayName: string;
@@ -42,6 +42,6 @@ export const patientProfileApi = {
   update: (patientProfileId: string, data: PatientProfilePayload) =>
     apiPut(`/patient-profiles/${patientProfileId}`, data),
 
-  delete: (patientProfileId: string) =>
-    apiDelete(`/patient-profiles/${patientProfileId}`),
+  archive: (patientProfileId: string) =>
+    apiPost(`/patient-profiles/${patientProfileId}/archive`, {}),
 };

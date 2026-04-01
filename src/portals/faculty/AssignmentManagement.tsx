@@ -8,7 +8,7 @@ import {
 import {
   IconClipboardList, IconPlus, IconRocket, IconArchive,
   IconPencil, IconCalendar, IconBook2, IconClipboardCheck,
-  IconInbox, IconDotsVertical, IconTrash,
+  IconInbox, IconDotsVertical,
 } from '@tabler/icons-react';
 import { fetchAssignments, selectAssignments, selectAssignmentsLoading } from '../../slices/assignmentSlice';
 import { assignmentApi } from '../../api/assignmentApi';
@@ -30,12 +30,12 @@ function AssignmentRow({
   assignment,
   onStatusChange,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
   assignment: Assignment;
   onStatusChange: (id: string, status: string) => void;
   onEdit: (id: string) => void;
-  onDelete: (assignment: Assignment) => void;
+  onArchive: (assignment: Assignment) => void;
 }) {
   const status = STATUS_CONFIG[assignment.status] ?? STATUS_CONFIG.draft;
   const mode = MODE_CONFIG[assignment.mode] ?? MODE_CONFIG.practice;
@@ -106,15 +106,6 @@ function AssignmentRow({
                 Publish
               </Menu.Item>
             )}
-            {assignment.status === 'published' && (
-              <Menu.Item
-                leftSection={<IconArchive size={14} />}
-                color="red"
-                onClick={() => onStatusChange(assignment.assignmentId, 'archived')}
-              >
-                Archive
-              </Menu.Item>
-            )}
             {assignment.status === 'archived' && (
               <Menu.Item
                 leftSection={<IconPencil size={14} />}
@@ -123,13 +114,15 @@ function AssignmentRow({
                 Move to Draft
               </Menu.Item>
             )}
-            <Menu.Item
-              leftSection={<IconTrash size={14} />}
-              color="red"
-              onClick={() => onDelete(assignment)}
-            >
-              Delete
-            </Menu.Item>
+            {assignment.status !== 'archived' && (
+              <Menu.Item
+                leftSection={<IconArchive size={14} />}
+                color="red"
+                onClick={() => onArchive(assignment)}
+              >
+                Archive
+              </Menu.Item>
+            )}
           </Menu.Dropdown>
         </Menu>
       </Group>
@@ -192,8 +185,8 @@ export default function AssignmentManagement() {
   const assignments = useSelector(selectAssignments);
   const loading = useSelector(selectAssignmentsLoading);
   const [statusFilter, setStatusFilter] = useState('all');
-  const [deleteTarget, setDeleteTarget] = useState<Assignment | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Assignment | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     dispatch(fetchAssignments());
@@ -208,15 +201,15 @@ export default function AssignmentManagement() {
     navigate(`${assignmentEditBasePath}/${assignmentId}/edit`);
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
+    setArchiving(true);
     try {
-      await assignmentApi.delete(deleteTarget.assignmentId);
-      setDeleteTarget(null);
+      await assignmentApi.updateStatus(archiveTarget.assignmentId, 'archived');
+      setArchiveTarget(null);
       dispatch(fetchAssignments());
     } finally {
-      setDeleting(false);
+      setArchiving(false);
     }
   };
 
@@ -291,30 +284,30 @@ export default function AssignmentManagement() {
               assignment={a}
               onStatusChange={handleStatusChange}
               onEdit={handleEdit}
-              onDelete={setDeleteTarget}
+              onArchive={setArchiveTarget}
             />
           ))}
         </Stack>
       )}
 
       <Modal
-        opened={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        title="Delete Assignment"
+        opened={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        title="Archive Assignment"
         size="sm"
         radius="lg"
       >
         <Stack gap="md">
           <Text size="sm">
-            Delete <b>{deleteTarget?.title}</b>? This will archive the assignment and remove it from active use,
+            Archive <b>{archiveTarget?.title}</b>? This will remove the assignment from active use,
             but keep historical session data intact.
           </Text>
           <Group justify="flex-end">
-            <Button variant="subtle" color="gray" radius="md" onClick={() => setDeleteTarget(null)}>
+            <Button variant="subtle" color="gray" radius="md" onClick={() => setArchiveTarget(null)}>
               Cancel
             </Button>
-            <Button color="red" radius="md" onClick={handleDelete} loading={deleting}>
-              Delete
+            <Button color="red" radius="md" onClick={handleArchive} loading={archiving}>
+              Archive
             </Button>
           </Group>
         </Stack>

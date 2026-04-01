@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
 
 export const assignmentApi = {
   list: (params?: { status?: string }) =>
@@ -15,7 +15,4 @@ export const assignmentApi = {
 
   updateStatus: (assignmentId: string, status: string) =>
     apiPut(`/assignments/${assignmentId}/status`, { status }),
-
-  delete: (assignmentId: string) =>
-    apiDelete(`/assignments/${assignmentId}`),
 };

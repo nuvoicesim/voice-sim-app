@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiDelete } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
 
 export const sceneCatalogApi = {
   list: () =>
@@ -13,6 +13,6 @@ export const sceneCatalogApi = {
   update: (sceneId: string, data: any) =>
     apiPut(`/scene-catalog/${sceneId}`, data),
 
-  delete: (sceneId: string) =>
-    apiDelete(`/scene-catalog/${sceneId}`),
+  archive: (sceneId: string) =>
+    apiPost(`/scene-catalog/${sceneId}/archive`, {}),
 };

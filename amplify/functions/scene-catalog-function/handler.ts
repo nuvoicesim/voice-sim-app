@@ -38,6 +38,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleListScenes();
     }
 
+    if (method === "POST" && event.resource?.includes("/archive")) {
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
+      if (authError) return authError;
+      const sceneId = event.pathParameters?.sceneId;
+      if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
+      return await handleArchiveScene(sceneId);
+    }
+
     if (method === "POST") {
       const caller = await extractCallerIdentity(event);
       const authError = requireRole(caller, ["simulation_designer", "admin"]);
@@ -54,16 +63,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleUpdateScene(sceneId, event.body);
     }
 
-    if (method === "DELETE") {
-      const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["simulation_designer", "admin"]);
-      if (authError) return authError;
-      const sceneId = event.pathParameters?.sceneId;
-      if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
-      return await handleDeleteScene(sceneId);
-    }
-
-    return methodNotAllowedResponse(["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+    return methodNotAllowedResponse(["GET", "POST", "PUT", "OPTIONS"]);
   } catch (error) {
     console.error("Unhandled error:", error);
     return serverErrorResponse("Internal server error");
@@ -172,7 +172,7 @@ async function handleUpdateScene(sceneId: string, body: string | null) {
   return createResponse(HTTP_STATUS.OK, updated);
 }
 
-async function handleDeleteScene(sceneId: string) {
+async function handleArchiveScene(sceneId: string) {
   const existing = await getItem(TABLE_NAME, { sceneId }, dynamo);
   if (!existing) return notFoundResponse("Scene not found");
 
@@ -183,5 +183,5 @@ async function handleDeleteScene(sceneId: string) {
   };
 
   await putItem(TABLE_NAME, updated, dynamo);
-  return createResponse(HTTP_STATUS.OK, { message: "Scene deactivated", sceneId });
+  return createResponse(HTTP_STATUS.OK, { message: "Scene archived", sceneId });
 }

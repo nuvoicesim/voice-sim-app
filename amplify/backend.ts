@@ -503,7 +503,8 @@ sceneCatalogPath.addMethod("POST", sceneCatalogLambdaIntegration, cognitoMethodO
 const sceneCatalogItemPath = sceneCatalogPath.addResource("{sceneId}");
 sceneCatalogItemPath.addMethod("GET", sceneCatalogLambdaIntegration, cognitoMethodOptions);
 sceneCatalogItemPath.addMethod("PUT", sceneCatalogLambdaIntegration, cognitoMethodOptions);
-sceneCatalogItemPath.addMethod("DELETE", sceneCatalogLambdaIntegration, cognitoMethodOptions);
+const sceneCatalogArchivePath = sceneCatalogItemPath.addResource("archive");
+sceneCatalogArchivePath.addMethod("POST", sceneCatalogLambdaIntegration, cognitoMethodOptions);
 
 // /patient-profiles
 const patientProfilesPath = myRestApi.root.addResource("patient-profiles");
@@ -512,7 +513,8 @@ patientProfilesPath.addMethod("POST", patientProfileLambdaIntegration, cognitoMe
 const patientProfileItemPath = patientProfilesPath.addResource("{patientProfileId}");
 patientProfileItemPath.addMethod("GET", patientProfileLambdaIntegration, cognitoMethodOptions);
 patientProfileItemPath.addMethod("PUT", patientProfileLambdaIntegration, cognitoMethodOptions);
-patientProfileItemPath.addMethod("DELETE", patientProfileLambdaIntegration, cognitoMethodOptions);
+const patientProfileArchivePath = patientProfileItemPath.addResource("archive");
+patientProfileArchivePath.addMethod("POST", patientProfileLambdaIntegration, cognitoMethodOptions);
 
 // /unity-builds
 const unityBuildsPath = myRestApi.root.addResource("unity-builds");
@@ -522,11 +524,12 @@ unityBuildUploadUrlPath.addMethod("POST", unityBuildLambdaIntegration, cognitoMe
 const unityBuildItemPath = unityBuildsPath.addResource("{unityBuildId}");
 unityBuildItemPath.addMethod("GET", unityBuildLambdaIntegration, cognitoMethodOptions);
 unityBuildItemPath.addMethod("PUT", unityBuildLambdaIntegration, cognitoMethodOptions);
-unityBuildItemPath.addMethod("DELETE", unityBuildLambdaIntegration, cognitoMethodOptions);
 const unityBuildItemUploadUrlPath = unityBuildItemPath.addResource("upload-url");
 unityBuildItemUploadUrlPath.addMethod("POST", unityBuildLambdaIntegration, cognitoMethodOptions);
 const unityBuildPublishPath = unityBuildItemPath.addResource("publish");
 unityBuildPublishPath.addMethod("POST", unityBuildLambdaIntegration, cognitoMethodOptions);
+const unityBuildArchivePath = unityBuildItemPath.addResource("archive");
+unityBuildArchivePath.addMethod("POST", unityBuildLambdaIntegration, cognitoMethodOptions);
 
 // /assignments
 const assignmentsPath = myRestApi.root.addResource("assignments");

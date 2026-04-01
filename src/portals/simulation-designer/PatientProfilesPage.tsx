@@ -20,13 +20,13 @@ import {
   Title,
 } from '@mantine/core';
 import {
+  IconArchive,
   IconBrain,
   IconEdit,
   IconHeadphones,
   IconInbox,
   IconMessageChatbot,
   IconPlus,
-  IconTrash,
   IconUserStar,
 } from '@tabler/icons-react';
 import { patientProfileApi, type PatientProfilePayload } from '../../api/patientProfileApi';
@@ -211,11 +211,11 @@ function EmptyState() {
 function ProfileCard({
   profile,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
   profile: PatientProfile;
   onEdit: (profile: PatientProfile) => void;
-  onDelete: (profile: PatientProfile) => void;
+  onArchive: (profile: PatientProfile) => void;
 }) {
   return (
     <Paper
@@ -248,8 +248,8 @@ function ProfileCard({
           <ActionIcon variant="light" color="blue" radius="xl" size="sm" onClick={() => onEdit(profile)}>
             <IconEdit size={14} />
           </ActionIcon>
-          <ActionIcon variant="light" color="red" radius="xl" size="sm" onClick={() => onDelete(profile)}>
-            <IconTrash size={14} />
+          <ActionIcon variant="light" color="red" radius="xl" size="sm" onClick={() => onArchive(profile)}>
+            <IconArchive size={14} />
           </ActionIcon>
         </Group>
       </Group>
@@ -297,7 +297,7 @@ export default function PatientProfilesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingProfile, setEditingProfile] = useState<PatientProfile | null>(null);
-  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
+  const [archivingProfileId, setArchivingProfileId] = useState<string | null>(null);
   const [form, setForm] = useState<PatientProfileFormState>({ ...EMPTY_FORM });
 
   const loadProfiles = async () => {
@@ -347,15 +347,15 @@ export default function PatientProfilesPage() {
     }
   };
 
-  const handleDelete = async (profile: PatientProfile) => {
-    setDeletingProfileId(profile.patientProfileId);
+  const handleArchive = async (profile: PatientProfile) => {
+    setArchivingProfileId(profile.patientProfileId);
     try {
-      await patientProfileApi.delete(profile.patientProfileId);
+      await patientProfileApi.archive(profile.patientProfileId);
       await loadProfiles();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to archive patient profile');
     } finally {
-      setDeletingProfileId(null);
+      setArchivingProfileId(null);
     }
   };
 
@@ -399,8 +399,8 @@ export default function PatientProfilesPage() {
         <SimpleGrid cols={{ base: 1, md: 2, xl: 3 }} spacing="lg">
           {profiles.map((profile) => (
             <Box key={profile.patientProfileId} style={{ position: 'relative' }}>
-              <ProfileCard profile={profile} onEdit={openEdit} onDelete={handleDelete} />
-              {deletingProfileId === profile.patientProfileId && (
+              <ProfileCard profile={profile} onEdit={openEdit} onArchive={handleArchive} />
+              {archivingProfileId === profile.patientProfileId && (
                 <Badge color="red" variant="filled" style={{ position: 'absolute', top: 14, right: 52 }}>
                   Archiving...
                 </Badge>

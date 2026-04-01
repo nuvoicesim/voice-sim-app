@@ -30,14 +30,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   if (method === "OPTIONS") return optionsResponse();
 
   try {
-    // DELETE /assignments/{assignmentId}
-    if (method === "DELETE" && pathParams?.assignmentId) {
-      const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
-      if (authError) return authError;
-      return await handleDeleteAssignment(pathParams.assignmentId);
-    }
-
     // PUT /assignments/{assignmentId}/status
     if (method === "PUT" && pathParams?.assignmentId && event.resource?.includes("/status")) {
       const caller = await extractCallerIdentity(event);
@@ -79,7 +71,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleCreateAssignment(caller!.userId, event.body);
     }
 
-    return methodNotAllowedResponse(["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+    return methodNotAllowedResponse(["GET", "POST", "PUT", "OPTIONS"]);
   } catch (error) {
     console.error("Unhandled error:", error);
     return serverErrorResponse("Internal server error");
@@ -256,21 +248,4 @@ async function handleUpdateStatus(assignmentId: string, body: string | null) {
 
   await putItem(TABLE_NAME, updated, dynamo);
   return createResponse(HTTP_STATUS.OK, updated);
-}
-
-async function handleDeleteAssignment(assignmentId: string) {
-  const existing = await getItem(TABLE_NAME, { assignmentId }, dynamo);
-  if (!existing) return notFoundResponse("Assignment not found");
-
-  const updated = {
-    ...existing,
-    status: "archived",
-    updatedAt: generateTimestamp(),
-  };
-
-  await putItem(TABLE_NAME, updated, dynamo);
-  return createResponse(HTTP_STATUS.OK, {
-    message: "Assignment archived",
-    assignmentId,
-  });
 }

@@ -5,7 +5,7 @@ import {
   ThemeIcon, Skeleton, SimpleGrid,
 } from '@mantine/core';
 import {
-  IconMovie, IconPlus, IconEdit, IconTrash, IconInbox,
+  IconMovie, IconPlus, IconEdit, IconArchive, IconInbox,
   IconTag, IconDeviceGamepad2, IconAlertTriangle,
 } from '@tabler/icons-react';
 import { sceneCatalogApi } from '../../api/sceneCatalogApi';
@@ -56,12 +56,12 @@ function SceneCard({
   scene,
   unityBuildLabel,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
   scene: Scene;
   unityBuildLabel: string;
   onEdit: (s: Scene) => void;
-  onDelete: (s: Scene) => void;
+  onArchive: (s: Scene) => void;
 }) {
   const diffColor = DIFFICULTY_COLORS[scene.difficulty] || 'gray';
   const diffGrad = DIFFICULTY_GRADIENT[scene.difficulty] || DIFFICULTY_GRADIENT.intermediate;
@@ -100,8 +100,8 @@ function SceneCard({
             <ActionIcon variant="light" color="blue" radius="xl" size="sm" onClick={() => onEdit(scene)}>
               <IconEdit size={14} />
             </ActionIcon>
-            <ActionIcon variant="light" color="red" radius="xl" size="sm" onClick={() => onDelete(scene)}>
-              <IconTrash size={14} />
+            <ActionIcon variant="light" color="red" radius="xl" size="sm" onClick={() => onArchive(scene)}>
+              <IconArchive size={14} />
             </ActionIcon>
           </Group>
         </Group>
@@ -202,8 +202,8 @@ export default function SceneManagement() {
   const [editingScene, setEditingScene] = useState<Scene | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Scene | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Scene | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
   const loadScenes = async () => {
     setLoading(true);
@@ -274,17 +274,17 @@ export default function SceneManagement() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
+    setArchiving(true);
     try {
-      await sceneCatalogApi.delete(deleteTarget.sceneId);
-      setDeleteTarget(null);
+      await sceneCatalogApi.archive(archiveTarget.sceneId);
+      setArchiveTarget(null);
       await loadScenes();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete scene');
+      setError(err instanceof Error ? err.message : 'Failed to archive scene');
     } finally {
-      setDeleting(false);
+      setArchiving(false);
     }
   };
 
@@ -350,7 +350,7 @@ export default function SceneManagement() {
                 || 'No published Unity build'
               }
               onEdit={openEdit}
-              onDelete={setDeleteTarget}
+              onArchive={setArchiveTarget}
             />
           ))}
         </SimpleGrid>
@@ -443,16 +443,16 @@ export default function SceneManagement() {
         </Stack>
       </Modal>
 
-      {/* ── Delete Confirmation Modal ── */}
+      {/* ── Archive Confirmation Modal ── */}
       <Modal
-        opened={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
+        opened={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
         title={
           <Group gap="xs">
             <ThemeIcon size={24} radius="xl" variant="light" color="red">
               <IconAlertTriangle size={13} />
             </ThemeIcon>
-            <Text fw={600}>Confirm Delete</Text>
+            <Text fw={600}>Archive Scene</Text>
           </Group>
         }
         size="sm"
@@ -460,15 +460,15 @@ export default function SceneManagement() {
       >
         <Stack gap="md">
           <Text size="sm">
-            Are you sure you want to deactivate <b>{deleteTarget?.title}</b>?
+            Are you sure you want to archive <b>{archiveTarget?.title}</b>?
             This scene will no longer appear in assignment creation.
           </Text>
           <Group justify="flex-end">
-            <Button variant="subtle" color="gray" radius="md" onClick={() => setDeleteTarget(null)}>
+            <Button variant="subtle" color="gray" radius="md" onClick={() => setArchiveTarget(null)}>
               Cancel
             </Button>
-            <Button color="red" radius="md" onClick={handleDelete} loading={deleting}>
-              Delete
+            <Button color="red" radius="md" onClick={handleArchive} loading={archiving}>
+              Archive
             </Button>
           </Group>
         </Stack>

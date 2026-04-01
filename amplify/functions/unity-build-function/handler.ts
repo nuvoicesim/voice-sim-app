@@ -544,19 +544,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handlePublishBuild(pathParams.unityBuildId);
     }
 
+    if (method === "POST" && pathParams?.unityBuildId && event.resource?.includes("/archive")) {
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
+      if (authError) return authError;
+      return await handleArchiveBuild(pathParams.unityBuildId);
+    }
+
     if (method === "PUT" && pathParams?.unityBuildId) {
       const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleUpdateBuild(pathParams.unityBuildId, event.body);
     }
 
-    if (method === "DELETE" && pathParams?.unityBuildId) {
-      const authError = requireRole(caller, ["simulation_designer", "admin"]);
-      if (authError) return authError;
-      return await handleArchiveBuild(pathParams.unityBuildId);
-    }
-
-    return methodNotAllowedResponse(["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+    return methodNotAllowedResponse(["GET", "POST", "PUT", "OPTIONS"]);
   } catch (error) {
     console.error("Unhandled error:", error);
     return serverErrorResponse("Internal server error");

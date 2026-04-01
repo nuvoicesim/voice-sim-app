@@ -241,7 +241,7 @@ export default function UnityBuildsPage() {
     setWorkingBuildId(unityBuildId);
     setError(null);
     try {
-      await unityBuildApi.delete(unityBuildId);
+      await unityBuildApi.archive(unityBuildId);
       await loadBuilds();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to archive Unity build');
