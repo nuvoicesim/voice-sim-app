@@ -228,9 +228,20 @@ export default function SessionDetailPage() {
                 </Group>
               </Badge>
               {evaluation.overallExplanation && (
-                <Text size="sm" c="dimmed" ta="center" style={{ lineHeight: 1.6 }}>
-                  {evaluation.overallExplanation}
-                </Text>
+                <Paper
+                  radius="md"
+                  p="md"
+                  withBorder
+                  style={{
+                    width: '100%',
+                    background: '#f8f9fb',
+                    border: '1px solid #edf0f5',
+                  }}
+                >
+                  <Text size="sm" c="dimmed" ta="left" style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                    {evaluation.overallExplanation}
+                  </Text>
+                </Paper>
               )}
             </Stack>
           ) : (
