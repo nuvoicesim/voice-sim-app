@@ -9,10 +9,17 @@ import {
   callOpenAIChat,
   OpenAIUpstreamError,
   type OpenAIMessage,
+  requireRuntimeTokenClaims,
+  applyRuntimeClaimsToBody,
+  RuntimeTokenError,
+  putItem,
+  generateTimestamp,
+  queryItems,
+  resolveRuntimeConfig,
+  ContextResolutionError,
+  createDynamoDbClient,
 } from "../shared";
 
-type SimulationLevel = 1 | 2 | 3;
-type Scenario = "task1" | "task2" | "task3";
 type DialogueRole = "system" | "user" | "assistant";
 
 interface DialogueMessage {
@@ -27,7 +34,6 @@ interface RuntimeContext {
 
 interface DialogueRequestBody {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   messages: DialogueMessage[];
   scenario?: string;
@@ -50,7 +56,6 @@ interface StructuredDialogueResponse {
 
 interface ValidatedDialogueRequest {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   messages: DialogueMessage[];
   scenario?: string;
@@ -74,6 +79,9 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? "12000");
 const UPSTREAM_RETRIES = Number(process.env.LLM_UPSTREAM_RETRIES ?? "1");
 const MAX_HISTORY_MESSAGES = Number(process.env.LLM_DIALOGUE_MAX_HISTORY ?? "20");
 const MAX_INPUT_CHARS = Number(process.env.LLM_MAX_INPUT_CHARS ?? "12000");
+const TURN_TABLE_NAME = process.env.TURN_TABLE_NAME;
+const RUNTIME_TOKEN_SECRET = process.env.RUNTIME_TOKEN_SECRET ?? "";
+const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
 
 const SAFE_FALLBACK_RESPONSE: StructuredDialogueResponse = {
   responseText: "I.. I don't k-know...",
@@ -136,9 +144,6 @@ const DIALOGUE_RESPONSE_FORMAT: Record<string, unknown> = {
   },
 };
 
-import { DIALOGUE_PROMPTS } from "./promptStrings";
-import { resolveScenarioKey, ContextResolutionError, createDynamoDbClient } from "../shared";
-
 const ASSIGNMENT_TABLE_NAME = process.env.ASSIGNMENT_TABLE_NAME;
 const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
 const dynamo = createDynamoDbClient();
@@ -167,12 +172,6 @@ function getRequestId(headers: Record<string, string | undefined> | undefined): 
     return requestIdHeader.trim();
   }
   return randomUUID();
-}
-
-function mapScenarioFromLevel(simulationLevel: SimulationLevel): Scenario {
-  if (simulationLevel === 1) return "task1";
-  if (simulationLevel === 2) return "task2";
-  return "task3";
 }
 
 function parseStructuredDialogue(content: string): StructuredDialogueResponse | null {
@@ -236,10 +235,9 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
   const hasContext = body.context && typeof body.context === "object"
     && typeof body.context.assignmentId === "string"
     && typeof body.context.sessionId === "string";
-  const hasLevel = typeof body.simulationLevel === "number" && [1, 2, 3].includes(body.simulationLevel);
 
-  if (!hasContext && !hasLevel) {
-    return { error: "Provide context.assignmentId + context.sessionId, or simulationLevel (1, 2, or 3)" };
+  if (!hasContext) {
+    return { error: "Provide context.assignmentId + context.sessionId" };
   }
 
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
@@ -274,7 +272,6 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
   return {
     request: {
       userID: body.userID,
-      simulationLevel: hasLevel ? body.simulationLevel : undefined,
       context: hasContext ? { assignmentId: body.context!.assignmentId, sessionId: body.context!.sessionId } : undefined,
       messages: validatedMessages,
       scenario: typeof body.scenario === "string" ? body.scenario : undefined,
@@ -385,6 +382,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  try {
+    const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+    payload = applyRuntimeClaimsToBody((payload as Record<string, unknown>) ?? {}, runtimeClaims);
+  } catch (error) {
+    if (error instanceof RuntimeTokenError) {
+      return respond(error.statusCode, {
+        error: error.message,
+        requestId,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+
   const validation = validateDialogueRequest(payload);
   if (!validation.request) {
     return respond(HTTP_STATUS.BAD_REQUEST, {
@@ -397,37 +408,33 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const request = validation.request;
 
   let scenario: string;
-  let isLegacy = true;
+  let runtimeConfig;
   try {
-    const resolved = await resolveScenarioKey(
-      { context: request.context, simulationLevel: request.simulationLevel },
+    runtimeConfig = await resolveRuntimeConfig(
+      { context: request.context },
       ASSIGNMENT_TABLE_NAME || "",
       SCENE_CATALOG_TABLE_NAME || "",
+      PATIENT_PROFILE_TABLE_NAME || "",
       dynamo
     );
-    scenario = resolved.scenarioKey;
-    isLegacy = resolved.isLegacy;
+    scenario = runtimeConfig.scenarioKey;
   } catch (error) {
     if (error instanceof ContextResolutionError) {
       return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
     }
-    // Fallback for missing table config
-    if (request.simulationLevel) {
-      scenario = mapScenarioFromLevel(request.simulationLevel);
-    } else {
-      return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
-    }
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
   }
 
-  const promptVersion = `${scenario}-dialogue-v1`;
-  const basePrompt = DIALOGUE_PROMPTS[scenario as keyof typeof DIALOGUE_PROMPTS];
-  if (!basePrompt) {
+  const dialogueConfig = runtimeConfig?.dialogue;
+  if (!dialogueConfig?.systemPrompt) {
     return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      error: "Configuration error",
+      error: "Dialogue runtime config is missing for this assignment",
       requestId,
       retryable: false,
     });
   }
+  const promptVersion = dialogueConfig.version || "runtime-dialogue";
+  const basePrompt = dialogueConfig.systemPrompt;
 
   const historyMessages = request.messages
     .filter((message) => message.role === "user" || message.role === "assistant")
@@ -442,6 +449,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  const lastUserMessage = [...historyMessages].reverse().find((message) => message.role === "user");
+
   const totalInputChars = historyMessages.reduce(
     (sum, message) => sum + message.content.length,
     0
@@ -454,11 +463,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
-  const temperature = request.options.temperature ?? DEFAULT_TEMPERATURE;
+  const temperature =
+    request.options.temperature
+    ?? dialogueConfig?.temperature
+    ?? DEFAULT_TEMPERATURE;
   const maxOutputTokens = Math.floor(
-    request.options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+    request.options.maxOutputTokens
+    ?? dialogueConfig?.maxOutputTokens
+    ?? DEFAULT_MAX_OUTPUT_TOKENS
   );
   const systemPrompt = buildSystemPrompt(basePrompt);
+  const modelName = dialogueConfig?.model || DEFAULT_MODEL;
   const startedAt = Date.now();
 
   const invokeDialogueModel = async (strictMode: boolean) => {
@@ -470,7 +485,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     return callOpenAIChat({
       apiKey: OPENAI_API_KEY,
-      model: DEFAULT_MODEL,
+      model: modelName,
       messages,
       temperature,
       maxOutputTokens,
@@ -495,7 +510,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     console.error("llm-dialogue upstream error", {
       requestId,
       userID: request.userID,
-      simulationLevel: request.simulationLevel,
       scenario,
       promptVersion,
       details: error instanceof Error ? error.message : String(error),
@@ -525,7 +539,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       console.error("llm-dialogue strict retry failed", {
         requestId,
         userID: request.userID,
-        simulationLevel: request.simulationLevel,
         scenario,
         promptVersion,
         details: error instanceof Error ? error.message : String(error),
@@ -554,7 +567,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     latencyMs,
     createdAt: new Date().toISOString(),
     metadata: {
-      scenario,
       promptVersion,
       sessionId: request.metadata.sessionId,
       turnIndex: request.metadata.turnIndex,
@@ -563,10 +575,42 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     },
   };
 
+  if (request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
+    try {
+      let turnIndex = request.metadata.turnIndex;
+      if (typeof turnIndex !== "number") {
+        const existingTurns = await queryItems(
+          TURN_TABLE_NAME,
+          "sessionId = :sid",
+          { ":sid": request.context.sessionId },
+          dynamo,
+          { scanIndexForward: false, limit: 1 }
+        );
+        turnIndex = existingTurns[0]?.turnIndex ? Number(existingTurns[0].turnIndex) + 1 : 1;
+      }
+
+      await putItem(
+        TURN_TABLE_NAME,
+        {
+          sessionId: request.context.sessionId,
+          turnIndex,
+          userText: lastUserMessage.content,
+          modelText: parsedResponse.responseText,
+          emotionCode: parsedResponse.emotionCode,
+          motionCode: parsedResponse.motionCode,
+          latencyMs,
+          timestamp: generateTimestamp(),
+        },
+        dynamo
+      );
+    } catch (error) {
+      console.warn("Failed to persist dialogue turn:", error);
+    }
+  }
+
   console.log("llm-dialogue request completed", {
     requestId,
     userID: request.userID,
-    simulationLevel: request.simulationLevel,
     model: finalModel,
     latencyMs,
     usage: finalUsage,
