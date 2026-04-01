@@ -541,7 +541,7 @@ async function handleCompleteSession(sessionId: string, studentUserId: string) {
   };
 
   await putItem(SESSION_TABLE, updated, dynamo);
-  return createResponse(HTTP_STATUS.OK, { session: updated });
+  return createResponse(HTTP_STATUS.OK, { session: await enrichSessionForLaunch(updated) });
 }
 
 async function handleListSessionsByAssignment(
