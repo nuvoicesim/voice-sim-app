@@ -16,6 +16,8 @@ export interface ResolvedContext {
   sceneId: string;
   scenarioKey: string;
   mode: string;
+  assignment: Record<string, unknown>;
+  scene: Record<string, unknown>;
 }
 
 /**
@@ -34,6 +36,10 @@ export async function resolveContext(
     throw new ContextResolutionError(`Assignment not found: ${context.assignmentId}`);
   }
 
+  if (typeof assignment.sceneId !== "string" || assignment.sceneId.trim() === "") {
+    throw new ContextResolutionError(`Assignment is missing sceneId: ${context.assignmentId}`);
+  }
+
   const scene = await getItem(sceneTableName, { sceneId: assignment.sceneId }, dynamo);
 
   if (!scene) {
@@ -50,6 +56,8 @@ export async function resolveContext(
     sceneId: scene.sceneId,
     scenarioKey: scene.scenarioKey,
     mode: assignment.mode,
+    assignment,
+    scene,
   };
 }
 

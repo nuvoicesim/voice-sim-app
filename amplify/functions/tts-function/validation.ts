@@ -29,6 +29,7 @@ export interface TtsRequestBody {
     sessionId?: string;
     turnIndex?: number;
     client?: string;
+    prewarm?: boolean;
   };
 }
 
@@ -46,6 +47,7 @@ export interface ValidatedTtsRequest {
     sessionId?: string;
     turnIndex?: number;
     client?: string;
+    prewarm?: boolean;
   };
 }
 
@@ -154,6 +156,8 @@ export function validateTtsRequest(
         turnIndex:
           typeof metadataInput.turnIndex === "number" ? metadataInput.turnIndex : undefined,
         client: typeof metadataInput.client === "string" ? metadataInput.client : undefined,
+        prewarm:
+          typeof metadataInput.prewarm === "boolean" ? metadataInput.prewarm : undefined,
       },
     },
   };

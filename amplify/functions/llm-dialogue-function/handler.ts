@@ -47,6 +47,7 @@ interface DialogueRequestBody {
     client?: string;
     userSpeechStartAt?: string;
     patientSpeechStartAt?: string;
+    prewarm?: boolean;
   };
 }
 
@@ -71,6 +72,7 @@ interface ValidatedDialogueRequest {
     client?: string;
     userSpeechStartAt?: string;
     patientSpeechStartAt?: string;
+    prewarm?: boolean;
   };
 }
 
@@ -287,6 +289,7 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
   const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
   const userSpeechStartAt = normalizeOptionalTimestamp(metadata.userSpeechStartAt);
   const patientSpeechStartAt = normalizeOptionalTimestamp(metadata.patientSpeechStartAt);
+  const prewarm = typeof metadata.prewarm === "boolean" ? metadata.prewarm : undefined;
 
   if ("userSpeechStartAt" in metadata && !userSpeechStartAt) {
     return { error: "metadata.userSpeechStartAt must be a valid ISO timestamp" };
@@ -312,6 +315,7 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
         client: typeof metadata.client === "string" ? metadata.client : undefined,
         userSpeechStartAt,
         patientSpeechStartAt,
+        prewarm,
       },
     },
   };
@@ -362,6 +366,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const requestOrigin = getHeaderValue(event.headers ?? undefined, "origin");
   const corsHeaders = buildCorsHeaders(requestOrigin, ALLOWED_ORIGINS, "GET,POST,OPTIONS");
   const requestId = getRequestId(event.headers ?? undefined);
+  const requestStartedAt = Date.now();
 
   const respond = (
     statusCode: number,
@@ -435,10 +440,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   const request = validation.request;
+  const isPrewarm = request.metadata.prewarm === true;
 
   let scenario: string;
   let runtimeConfig;
+  let runtimeConfigMs = 0;
   try {
+    const runtimeConfigStartedAt = Date.now();
     runtimeConfig = await resolveRuntimeConfig(
       { context: request.context },
       ASSIGNMENT_TABLE_NAME || "",
@@ -446,6 +454,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       PATIENT_PROFILE_TABLE_NAME || "",
       dynamo
     );
+    runtimeConfigMs = Date.now() - runtimeConfigStartedAt;
     scenario = runtimeConfig.scenarioKey;
   } catch (error) {
     if (error instanceof ContextResolutionError) {
@@ -541,7 +550,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       userID: request.userID,
       scenario,
       promptVersion,
+      prewarm: isPrewarm,
       details: error instanceof Error ? error.message : String(error),
+      runtimeConfigMs,
+      totalRequestMs: Date.now() - requestStartedAt,
     });
 
     return respond(upstream.statusCode, {
@@ -570,7 +582,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         userID: request.userID,
         scenario,
         promptVersion,
+        prewarm: isPrewarm,
         details: error instanceof Error ? error.message : String(error),
+        runtimeConfigMs,
+        totalRequestMs: Date.now() - requestStartedAt,
       });
     }
   }
@@ -583,7 +598,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const latencyMs = Date.now() - startedAt;
   let resolvedTurnIndex = request.metadata.turnIndex;
 
-  if (request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
+  if (!isPrewarm && request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
     try {
       if (typeof resolvedTurnIndex !== "number") {
         const existingTurns = await queryItems(
@@ -635,6 +650,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       promptVersion,
       sessionId: request.metadata.sessionId,
       turnIndex: resolvedTurnIndex,
+      prewarm: isPrewarm,
       fallbackUsed,
       malformedRetryTriggered,
     },
@@ -644,7 +660,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     requestId,
     userID: request.userID,
     model: finalModel,
+    prewarm: isPrewarm,
+    runtimeConfigMs,
     latencyMs,
+    totalRequestMs: Date.now() - requestStartedAt,
     usage: finalUsage,
     promptVersion,
     scenario,

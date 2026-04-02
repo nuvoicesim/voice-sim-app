@@ -98,6 +98,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const requestOrigin = getHeaderValue(event.headers ?? undefined, "origin");
   const corsHeaders = buildCorsHeaders(requestOrigin, ALLOWED_ORIGINS, "GET,POST,OPTIONS");
   const requestId = getRequestId(event.headers ?? undefined);
+  const requestStartedAt = Date.now();
 
   const respond = (
     statusCode: number,
@@ -173,9 +174,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   const request = validation.request;
+  const isPrewarm = request.metadata.prewarm === true;
 
   let runtimeConfig;
+  let runtimeConfigMs = 0;
   try {
+    const runtimeConfigStartedAt = Date.now();
     runtimeConfig = await resolveRuntimeConfig(
       { context: request.context },
       ASSIGNMENT_TABLE_NAME || "",
@@ -183,6 +187,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       PATIENT_PROFILE_TABLE_NAME || "",
       dynamo
     );
+    runtimeConfigMs = Date.now() - runtimeConfigStartedAt;
   } catch (error) {
     if (error instanceof ContextResolutionError) {
       return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
@@ -250,9 +255,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       userID: request.userID,
       context: request.context,
       scenario: runtimeConfig?.scenarioKey,
+      prewarm: isPrewarm,
       profileId: effectiveProfile.profileId,
       provider: "elevenlabs",
+      runtimeConfigMs,
       latencyMs,
+      totalRequestMs: Date.now() - requestStartedAt,
       outcome: "success",
       adjustedFields,
       sessionId: request.metadata.sessionId,
@@ -278,6 +286,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       profileId: effectiveProfile.profileId,
       provider: "elevenlabs",
       outcome: "error",
+      prewarm: isPrewarm,
+      runtimeConfigMs,
+      totalRequestMs: Date.now() - requestStartedAt,
       statusCode: mapped.statusCode,
       details: error instanceof Error ? error.message : String(error),
       sessionId: request.metadata.sessionId,

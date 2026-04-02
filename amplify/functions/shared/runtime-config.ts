@@ -143,9 +143,8 @@ export async function resolveRuntimeConfig(
   }
 
   const resolvedContext = await resolveContext(body.context, assignmentTableName, sceneTableName, dynamo);
-
-  const assignment = await getItem(assignmentTableName, { assignmentId: resolvedContext.assignmentId }, dynamo);
-  const scene = await getItem(sceneTableName, { sceneId: resolvedContext.sceneId }, dynamo);
+  const assignment = resolvedContext.assignment;
+  const scene = resolvedContext.scene;
   const patientProfileId =
     typeof assignment?.patientProfileId === "string" ? assignment.patientProfileId : undefined;
   if (!patientProfileId) {

@@ -12,6 +12,7 @@ import {
 import { fetchSession, completeSession, selectCurrentSession, selectSessionsLoading } from '../../slices/sessionSlice';
 import { selectUserId } from '../../slices/authSlice';
 import { sessionApi } from '../../api/sessionApi';
+import { apiPost } from '../../api/apiClient';
 import type { AppDispatch } from '../../store';
 
 function resolveUnitySrc(unityLaunchUrl?: string | null) {
@@ -109,6 +110,7 @@ export default function SessionRunner() {
   const [runtimeToken, setRuntimeToken] = useState<RuntimeTokenResponse | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const prewarmedSessionRef = useRef<string | null>(null);
   const unitySrc = useMemo(
     () => resolveUnitySrc(routeState?.unityLaunchUrl || session?.unityLaunchUrl || null),
     [routeState?.unityLaunchUrl, session?.unityLaunchUrl]
@@ -227,6 +229,48 @@ export default function SessionRunner() {
       iframeOrigin
     );
   }, [iframeOrigin, iframeReady, runtimeToken, session, userId]);
+
+  useEffect(() => {
+    if (!session?.sessionId || session.status !== 'active' || !runtimeToken?.runtimeToken) {
+      return;
+    }
+
+    if (prewarmedSessionRef.current === session.sessionId) {
+      return;
+    }
+
+    prewarmedSessionRef.current = session.sessionId;
+
+    const runtimeHeaders = { Authorization: `Bearer ${runtimeToken.runtimeToken}` };
+    const sharedMetadata = { client: 'web-prewarm', prewarm: true };
+
+    void Promise.allSettled([
+      apiPost(
+        '/llm-dialogue',
+        {
+          messages: [{ role: 'user', content: 'Hello.' }],
+          options: { temperature: 0, maxOutputTokens: 24 },
+          metadata: sharedMetadata,
+        },
+        runtimeHeaders
+      ),
+      apiPost(
+        '/tts',
+        {
+          text: 'Hello.',
+          options: { format: 'pcm_16000', includeAlignment: false },
+          metadata: sharedMetadata,
+        },
+        runtimeHeaders
+      ),
+    ]).then(([llmResult, ttsResult]) => {
+      console.log('runtime prewarm completed', {
+        sessionId: session.sessionId,
+        llmStatus: llmResult.status,
+        ttsStatus: ttsResult.status,
+      });
+    });
+  }, [runtimeToken?.runtimeToken, session?.sessionId, session?.status]);
 
   const handleScoreAndComplete = async () => {
     if (!session || !runtimeToken?.runtimeToken || scoring) return;
