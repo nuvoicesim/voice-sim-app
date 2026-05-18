@@ -32,6 +32,7 @@ import {
   resolvePhase1RubricConfig,
   type Phase1RubricSectionConfig,
 } from "./phase1-rubric-config";
+import { stripUndefined } from "./sanitize-evidence";
 
 const DEFAULT_MODEL = process.env.LLM_SCORING_MODEL || "gpt-4o-2024-08-06";
 const DEFAULT_TEMPERATURE = Number(process.env.LLM_SCORING_TEMPERATURE ?? "0.2");
@@ -221,6 +222,10 @@ async function persistEvidence(
     nullableString(envelope.userID) ||
     "";
 
+  // Item-level multi-item submissions (Sections A/C/D) carry items in
+  // rawEvidencePayload.studyTaskContext.items[]. The single normalized itemId
+  // column is intentionally omitted on the persisted row in that case rather
+  // than picking an arbitrary one — prefer correctness over over-normalization.
   const row = {
     evidenceId,
     sessionId: envelope.context?.sessionId ?? "",
@@ -230,7 +235,6 @@ async function persistEvidence(
     taskType: nullableString(tc.taskType) ?? cfg.taskType,
     sectionId: nullableString(tc.sectionId) ?? cfg.sectionId,
     taskId: nullableString(tc.taskId),
-    itemId: undefined,
     patientProfileId: nullableString(tc.patientProfileId),
     feedbackUse: nullableString(tc.feedbackUse) ?? "phase1_rubric_assessment",
     scoringMode: nullableString(tc.scoringMode) ?? "phase1-rubric",
@@ -242,7 +246,7 @@ async function persistEvidence(
   };
 
   try {
-    await putItem(deps.sessionEvidenceTableName, row, deps.dynamo);
+    await putItem(deps.sessionEvidenceTableName, stripUndefined(row), deps.dynamo);
     return evidenceId;
   } catch (e) {
     console.warn("[phase1-rubric] SessionEvidence putItem failed", e);

@@ -441,13 +441,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
   }
 
-  if (!OPENAI_API_KEY) {
-    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      error: "Configuration error",
-      requestId,
-      retryable: false,
-    });
-  }
+  // OPENAI_API_KEY is verified per branch below (Phase 1 rubric and legacy
+  // narrative require it; Phase 2 evidence persistence does NOT call OpenAI
+  // and must succeed even when the key is unavailable).
 
   let payload: unknown;
   try {
@@ -510,6 +506,16 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
   // ─── End VOICE study dispatch — fall through to legacy narrative path ───
+
+  // Legacy narrative scoring requires OpenAI; reject early if it's not
+  // configured (matches prior behavior at the top of the handler).
+  if (!OPENAI_API_KEY) {
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+      error: "Configuration error",
+      requestId,
+      retryable: false,
+    });
+  }
 
   const validation = validateScoringRequest(payload);
   if (!validation.request) {

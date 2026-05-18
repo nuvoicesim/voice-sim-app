@@ -20,6 +20,7 @@ import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
 import { HTTP_STATUS, createResponse, putItem, generateTimestamp } from "../shared";
 import type { RuntimeTokenClaims } from "../shared/runtime-token";
+import { stripUndefined } from "./sanitize-evidence";
 
 export interface Phase2EvidenceDeps {
   dynamo: DynamoDBDocumentClient;
@@ -85,17 +86,19 @@ function validatePhase2Envelope(payload: unknown): {
     return { error: "Phase 2 evidence requires taskContext" };
   }
 
+  // studyTaskContext is INTENTIONALLY optional here. Phase 2 routing is keyed
+  // off taskContext.phaseId only; whatever evidence Unity supplies (or doesn't)
+  // is preserved verbatim in rawEvidencePayload for Phase 3 reuse. Over-
+  // validating optional nested evidence blocks would reject submissions whose
+  // shape evolves on the Unity side (e.g. future cue telemetry).
   const studyCtx = asObject(obj.studyTaskContext);
-  if (!studyCtx) {
-    return { error: "Phase 2 evidence requires studyTaskContext" };
-  }
 
   return {
     body: {
       userID: obj.userID,
       context: { assignmentId, sessionId },
       taskContext: tc as Phase2RequestEnvelope["taskContext"],
-      studyTaskContext: studyCtx as Phase2RequestEnvelope["studyTaskContext"],
+      studyTaskContext: studyCtx as Phase2RequestEnvelope["studyTaskContext"] | undefined,
       ...obj,
     },
   };
@@ -131,6 +134,14 @@ export async function handlePhase2Evidence(
     nullableString(envelope.userID) ||
     "";
 
+  // Fields intentionally absent on Phase 2 rows:
+  //   - itemId: Phase 2 submissions cover a task; items (if any) live in
+  //     rawEvidencePayload.studyTaskContext.items[].
+  //   - promptVersion: Phase 2 makes no rubric/LLM call.
+  //   - rubricAssessmentPayload: Phase 2 produces no rubric.
+  // Other optional fields (taskType, sectionId, taskId, patientProfileId,
+  // scoringMode) become undefined when Unity didn't include them on
+  // taskContext; stripUndefined removes them before the DynamoDB write.
   const row = {
     evidenceId,
     sessionId: envelope.context!.sessionId!,
@@ -140,19 +151,16 @@ export async function handlePhase2Evidence(
     taskType: nullableString(tc.taskType),
     sectionId: nullableString(tc.sectionId),
     taskId: nullableString(tc.taskId),
-    itemId: undefined,
     patientProfileId: nullableString(tc.patientProfileId),
     feedbackUse: nullableString(tc.feedbackUse) ?? "phase2_training_evidence",
     scoringMode: nullableString(tc.scoringMode),
-    promptVersion: undefined,
     rawEvidencePayload: envelope as unknown as Record<string, unknown>,
-    rubricAssessmentPayload: undefined,
     submittedAt: now,
     createdAt: now,
   };
 
   try {
-    await putItem(deps.sessionEvidenceTableName, row, deps.dynamo);
+    await putItem(deps.sessionEvidenceTableName, stripUndefined(row), deps.dynamo);
   } catch (e) {
     console.error("[phase2-evidence] SessionEvidence putItem failed", {
       requestId: deps.requestId,
