@@ -151,7 +151,69 @@ npm install
 cd ..
 ```
 
-### 3. Start Local Development Environment
+### 3. Create `.env.local` (Runtime Token Secret)
+
+The backend signs short-lived JWTs that the Unity WebGL client uses to call the LLM / TTS / session-completion endpoints. The HMAC secret for those JWTs is **not** committed to the repo — every developer keeps it in their own `.env.local` at the repo root.
+
+`.env.local` is already covered by `.gitignore` (`.env.*`). [`amplify/backend.ts`](amplify/backend.ts) reads it at synth time and injects every key into `process.env` before the Lambda env vars are wired up. Explicit shell env vars (CI, Amplify Hosting) still win — `.env.local` only fills in keys you haven't set elsewhere.
+
+Create the file at the repo root:
+
+```
+voice-sim-app/.env.local
+```
+
+with at minimum:
+
+```ini
+# Shared HMAC secret used to sign and verify the Unity runtime JWT.
+# Use any high-entropy string (>= 32 chars). Rotate by replacing and redeploying.
+RUNTIME_TOKEN_SECRET=<paste-a-random-64+-char-string-here>
+
+# OpenAI API key — used by llm-dialogue and llm-scoring.
+OPENAI_API_KEY=<your-openai-api-key>
+
+# ElevenLabs API key — used by the tts function.
+ELEVENLABS_API_KEY=<your-elevenlabs-api-key>
+
+# Optional overrides:
+# RUNTIME_TOKEN_TTL_SECONDS=1800
+# UNITY_DEV_BOOTSTRAP_ENABLED=true
+# UNITY_DEV_BOOTSTRAP_KEY=<dev-only-bootstrap-key>
+# LLM_ALLOWED_ORIGINS=http://localhost:5173,https://www.voice-sim.org
+# LLM_UPSTREAM_RETRIES=1
+```
+
+Any key left blank causes the matching endpoint to return HTTP 500 `{ "error": "Configuration error" }`:
+
+| Missing key | Endpoint(s) that 500 |
+|-------------|----------------------|
+| `OPENAI_API_KEY` | `POST /llm-dialogue`, `POST /llm-scoring` |
+| `ELEVENLABS_API_KEY` | `POST /tts` |
+| `RUNTIME_TOKEN_SECRET` | `POST /sessions/{id}/runtime-token`, plus any endpoint that verifies a runtime JWT |
+
+Generate a strong secret (pick one):
+
+```powershell
+# PowerShell (Windows)
+$bytes = New-Object byte[] 48
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+([System.BitConverter]::ToString($bytes)) -replace '-',''
+```
+
+```bash
+# Bash / macOS / Linux
+openssl rand -hex 48
+# or
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+Notes:
+- The same secret must be valid for the entire token lifetime. If you rotate it, any sessions holding in-flight tokens will start failing — pick something stable.
+- All five token-using Lambdas (`session`, `llm-dialogue`, `llm-scoring`, `tts`, `survey-template`) share the same value — they're wired up together in `amplify/backend.ts`, so a normal `npx ampx sandbox` redeploy handles distribution.
+- If `RUNTIME_TOKEN_SECRET` is missing at deploy time, the runtime-token endpoint will return HTTP 500 with `Runtime token configuration is missing` and the session page will show `Unable to initialize the Unity runtime session: Runtime token configuration is missing`.
+
+### 4. Start Local Development Environment
 
 Start Amplify Sandbox (backend) in one terminal:
 
@@ -309,6 +371,12 @@ Key environment variables configured in `amplify/backend.ts`:
 | `USER_POOL_ID` | auth, cognito-user | Cognito User Pool ID |
 | `CLIENT_ID` | auth | Cognito app client ID |
 | `S3_BUCKET_NAME` | download-url | Unity client download bucket |
+| `RUNTIME_TOKEN_SECRET` | session, llm-dialogue, llm-scoring, tts, survey-template | HMAC secret for the Unity runtime JWT — see [step 3](#3-create-envlocal-runtime-token-secret) |
+| `RUNTIME_TOKEN_TTL_SECONDS` | session, llm-dialogue, llm-scoring, tts, survey-template | Runtime JWT lifetime in seconds (default `1800`) |
+| `UNITY_DEV_BOOTSTRAP_ENABLED` | session | Enables the dev-only `/sessions/dev-bootstrap` endpoint (defaults to `true` outside `prod`) |
+| `UNITY_DEV_BOOTSTRAP_KEY` | session | Shared key required to call `/sessions/dev-bootstrap` |
+
+Local development reads these from `.env.local` at the repo root (loaded by `amplify/backend.ts`). CI / Amplify Hosting should inject them via the build environment — explicit shell env vars override `.env.local`.
 
 ## References
 

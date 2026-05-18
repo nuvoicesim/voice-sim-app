@@ -4,7 +4,6 @@ import {
   Badge,
   Box,
   Button,
-  Center,
   Group,
   Modal,
   Paper,
@@ -13,24 +12,22 @@ import {
   Stack,
   Text,
   TextInput,
-  ThemeIcon,
-  Title,
 } from '@mantine/core';
 import {
   IconArchive,
-  IconCloudUpload,
   IconExternalLink,
   IconInbox,
   IconRefresh,
   IconUpload,
 } from '@tabler/icons-react';
 import { unityBuildApi, type UnityBuild } from '../../api/unityBuildApi';
+import { PageHeader, EmptyState } from '../../components/design';
 
 const STATUS_COLORS: Record<UnityBuild['status'], string> = {
-  uploaded: 'yellow',
-  published: 'teal',
-  archived: 'red',
-  failed: 'orange',
+  uploaded: 'parchment',
+  published: 'terracotta',
+  archived: 'parchment',
+  failed: 'terracotta',
 };
 
 function LoadingSkeleton() {
@@ -49,24 +46,6 @@ function LoadingSkeleton() {
         </Paper>
       ))}
     </SimpleGrid>
-  );
-}
-
-function EmptyState() {
-  return (
-    <Center style={{ minHeight: 320 }}>
-      <Stack align="center" gap="lg">
-        <ThemeIcon size={88} radius="xl" variant="light" color="violet">
-          <IconInbox size={40} />
-        </ThemeIcon>
-        <Box ta="center">
-          <Title order={4} mb={4}>No Unity builds yet</Title>
-          <Text c="dimmed" size="sm" maw={340}>
-            Upload a Unity WebGL zip and publish it to S3 so scenes can launch a managed build instead of a local folder.
-          </Text>
-        </Box>
-      </Stack>
-    </Center>
   );
 }
 
@@ -144,9 +123,7 @@ export default function UnityBuildsPage() {
     try {
       response = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: {
-          'Content-Type': contentType,
-        },
+        headers: { 'Content-Type': contentType },
         body: file,
       });
     } catch (error) {
@@ -260,53 +237,60 @@ export default function UnityBuildsPage() {
         onChange={(event) => void handleReplaceFileSelected(event)}
       />
 
-      <Group justify="space-between" align="flex-start">
-        <Box>
-          <Group gap="sm" mb={4}>
-            <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'violet', to: 'grape' }}>
-              <IconCloudUpload size={20} color="white" />
-            </ThemeIcon>
-            <Title order={2} fw={700}>Unity Builds</Title>
-          </Group>
-          <Text c="dimmed" size="sm" ml={52}>
-            Upload Unity WebGL zip files, publish them to S3, and attach published builds to scenes.
-          </Text>
-        </Box>
-
-        <Button
-          radius="xl"
-          leftSection={<IconUpload size={16} />}
-          variant="gradient"
-          gradient={{ from: 'violet', to: 'grape' }}
-          onClick={() => setModalOpen(true)}
-        >
-          Upload Build
-        </Button>
-      </Group>
+      <PageHeader
+        title="Unity Builds"
+        subtitle="Upload Unity WebGL zip files, publish them to S3, and attach published builds to scenes."
+        actions={
+          <Button
+            radius="lg"
+            color="terracotta"
+            leftSection={<IconUpload size={16} />}
+            onClick={() => setModalOpen(true)}
+          >
+            Upload Build
+          </Button>
+        }
+      />
 
       {error && (
-        <Paper radius="md" p="sm" withBorder style={{ borderColor: '#fecaca', background: '#fff1f2' }}>
-          <Text size="sm" c="red.7">{error}</Text>
+        <Paper radius="md" p="sm" style={{ borderColor: 'var(--claude-terracotta)', background: 'var(--claude-ivory)', border: '1px solid var(--claude-terracotta)' }}>
+          <Text size="sm" c="var(--claude-terracotta)">{error}</Text>
         </Paper>
       )}
 
       {loading ? (
         <LoadingSkeleton />
       ) : sortedBuilds.length === 0 ? (
-        <EmptyState />
+        <EmptyState
+          icon={<IconInbox size={28} />}
+          title="No Unity builds yet"
+          description="Upload a Unity WebGL zip and publish it to S3 so scenes can launch a managed build instead of a local folder."
+          ctaLabel="Upload Build"
+          onCta={() => setModalOpen(true)}
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, md: 2, xl: 3 }} spacing="lg">
           {sortedBuilds.map((unityBuild) => (
-            <Paper key={unityBuild.unityBuildId} radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
+            <Paper
+              key={unityBuild.unityBuildId}
+              radius="lg" p="lg"
+              style={{
+                background: 'var(--claude-ivory)',
+                border: '1px solid var(--claude-border-cream)',
+                boxShadow: 'var(--claude-shadow-whisper)',
+              }}
+            >
               <Group justify="space-between" align="flex-start" mb="md">
                 <Box style={{ flex: 1, minWidth: 0 }}>
                   <Group gap="xs" mb={4}>
-                    <Text fw={700} size="md" lineClamp={1}>{unityBuild.displayName}</Text>
+                    <Text fw={500} size="md" lineClamp={1} c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+                      {unityBuild.displayName}
+                    </Text>
                     <Badge variant="light" color={STATUS_COLORS[unityBuild.status]} radius="xl" size="xs">
                       {unityBuild.status}
                     </Badge>
                   </Group>
-                  <Badge variant="outline" radius="xl" size="xs" color="gray">
+                  <Badge variant="outline" radius="xl" size="xs" color="parchment">
                     {unityBuild.buildKey}
                   </Badge>
                 </Box>
@@ -318,8 +302,8 @@ export default function UnityBuildsPage() {
                       target="_blank"
                       rel="noreferrer"
                       variant="light"
-                      color="blue"
-                      radius="xl"
+                      color="terracotta"
+                      radius="md"
                       size="sm"
                     >
                       <IconExternalLink size={14} />
@@ -327,8 +311,8 @@ export default function UnityBuildsPage() {
                   )}
                   <ActionIcon
                     variant="light"
-                    color="violet"
-                    radius="xl"
+                    color="terracotta"
+                    radius="md"
                     size="sm"
                     onClick={() => triggerReplaceZip(unityBuild.unityBuildId)}
                     loading={workingBuildId === unityBuild.unityBuildId}
@@ -337,8 +321,8 @@ export default function UnityBuildsPage() {
                   </ActionIcon>
                   <ActionIcon
                     variant="light"
-                    color="red"
-                    radius="xl"
+                    color="parchment"
+                    radius="md"
                     size="sm"
                     onClick={() => void handleArchive(unityBuild.unityBuildId)}
                     loading={workingBuildId === unityBuild.unityBuildId}
@@ -349,13 +333,13 @@ export default function UnityBuildsPage() {
               </Group>
 
               <Stack gap="xs">
-                <Text size="xs" c="dimmed">Source Zip: {unityBuild.sourceFileName}</Text>
-                <Text size="xs" c="dimmed">Entry HTML: {unityBuild.entryHtml}</Text>
-                <Text size="xs" c="dimmed">Updated: {new Date(unityBuild.updatedAt).toLocaleString()}</Text>
+                <Text size="xs" c="var(--claude-olive)">Source Zip: {unityBuild.sourceFileName}</Text>
+                <Text size="xs" c="var(--claude-olive)">Entry HTML: {unityBuild.entryHtml}</Text>
+                <Text size="xs" c="var(--claude-olive)">Updated: {new Date(unityBuild.updatedAt).toLocaleString()}</Text>
                 {unityBuild.launchUrl ? (
-                  <Text size="xs" c="dimmed" lineClamp={2}>Launch URL: {unityBuild.launchUrl}</Text>
+                  <Text size="xs" c="var(--claude-olive)" lineClamp={2}>Launch URL: {unityBuild.launchUrl}</Text>
                 ) : (
-                  <Text size="xs" c="orange.7">Publish this build before attaching it to a scene.</Text>
+                  <Text size="xs" c="var(--claude-terracotta)">Publish this build before attaching it to a scene.</Text>
                 )}
               </Stack>
             </Paper>
@@ -371,6 +355,7 @@ export default function UnityBuildsPage() {
         }}
         title="Upload Unity Build"
         centered
+        radius="lg"
       >
         <Stack gap="md">
           <TextInput
@@ -395,6 +380,7 @@ export default function UnityBuildsPage() {
           />
           <Button
             variant="light"
+            color="terracotta"
             onClick={() => document.getElementById('unity-build-upload-input')?.click()}
           >
             {selectedFile ? selectedFile.name : 'Choose Unity WebGL Zip'}
@@ -410,7 +396,7 @@ export default function UnityBuildsPage() {
           <Group justify="flex-end">
             <Button
               variant="subtle"
-              color="gray"
+              color="parchment"
               onClick={() => {
                 setModalOpen(false);
                 resetCreateForm();
@@ -419,8 +405,7 @@ export default function UnityBuildsPage() {
               Cancel
             </Button>
             <Button
-              variant="gradient"
-              gradient={{ from: 'violet', to: 'grape' }}
+              color="terracotta"
               onClick={() => void handleCreateBuild()}
               loading={workingBuildId === 'creating'}
             >

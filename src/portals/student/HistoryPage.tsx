@@ -1,34 +1,25 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Title, Text, Badge, Stack, Center, Group,
+  Text, Badge, Stack, Center, Group,
   Paper, TextInput, SegmentedControl, SimpleGrid, Box,
   ThemeIcon, Skeleton,
 } from '@mantine/core';
 import {
-  IconSearch, IconHistory, IconBook2, IconClipboardCheck,
+  IconSearch, IconBook2, IconClipboardCheck,
   IconClock, IconCalendar, IconChevronRight, IconArchive,
-  IconHash, IconHourglass,
+  IconHash, IconHourglass, IconHistory,
 } from '@tabler/icons-react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchAssignments, selectAssignments } from '../../slices/assignmentSlice';
 import { sessionApi } from '../../api/sessionApi';
 import type { AppDispatch } from '../../store';
 import type { Session } from '../../slices/sessionSlice';
+import { PageHeader, StatCard, EmptyState as EmptyStateCmp } from '../../components/design';
 
-const MODE_CONFIG: Record<string, { color: string; gradient: string; icon: typeof IconBook2; label: string }> = {
-  practice: {
-    color: 'blue',
-    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    icon: IconBook2,
-    label: 'Practice',
-  },
-  assessment: {
-    color: 'orange',
-    gradient: 'linear-gradient(135deg, #f5af19 0%, #f12711 100%)',
-    icon: IconClipboardCheck,
-    label: 'Assessment',
-  },
+const MODE_CONFIG: Record<string, { color: string; icon: typeof IconBook2; label: string }> = {
+  practice: { color: 'parchment', icon: IconBook2, label: 'Practice' },
+  assessment: { color: 'terracotta', icon: IconClipboardCheck, label: 'Assessment' },
 };
 
 function formatDuration(startedAt: string, endedAt: string | null): string {
@@ -72,38 +63,29 @@ function SessionItem({
 
   return (
     <Paper
-      shadow="sm"
       radius="lg"
       p={0}
-      withBorder
       style={{
         overflow: 'hidden',
         cursor: 'pointer',
-        transition: 'box-shadow 0.2s ease, transform 0.2s ease',
-        border: '1px solid #edf0f5',
+        transition: 'box-shadow 0.2s ease',
+        background: 'var(--claude-ivory)',
+        border: '1px solid var(--claude-border-cream)',
+        boxShadow: 'var(--claude-shadow-whisper)',
       }}
       onClick={onClick}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '';
-        e.currentTarget.style.transform = '';
-      }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta), var(--claude-shadow-whisper)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
     >
-      <Box style={{ height: 3, background: modeConf.gradient }} />
-
       <Group p="lg" justify="space-between" wrap="nowrap" gap="lg">
-        {/* Left: icon + info */}
         <Group gap="md" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-          <ThemeIcon size={44} radius="xl" variant="light" color={modeConf.color}>
+          <ThemeIcon size={44} radius="md" variant="light" color={modeConf.color}>
             <ModeIcon size={22} />
           </ThemeIcon>
 
           <Box style={{ flex: 1, minWidth: 0 }}>
             <Group gap="xs" mb={2} wrap="nowrap">
-              <Text fw={600} size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+              <Text fw={500} size="sm" lineClamp={1} c="var(--claude-near-black)" style={{ flex: 1, minWidth: 0, fontFamily: 'Georgia, serif' }}>
                 {assignmentTitle}
               </Text>
               <Badge variant="light" color={modeConf.color} size="xs" radius="xl" style={{ flexShrink: 0 }}>
@@ -113,26 +95,25 @@ function SessionItem({
 
             <Group gap="lg" wrap="wrap">
               <Group gap={5}>
-                <IconHash size={13} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">Attempt {session.attemptNo}</Text>
+                <IconHash size={13} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">Attempt {session.attemptNo}</Text>
               </Group>
               <Group gap={5}>
-                <IconCalendar size={13} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">{relDate}</Text>
+                <IconCalendar size={13} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">{relDate}</Text>
               </Group>
               <Group gap={5}>
-                <IconClock size={13} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">{duration}</Text>
+                <IconClock size={13} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">{duration}</Text>
               </Group>
             </Group>
           </Box>
         </Group>
 
-        {/* Right: completed time + arrow */}
         <Group gap="sm" wrap="nowrap" style={{ flexShrink: 0 }}>
           <Box style={{ textAlign: 'right' }} visibleFrom="sm">
-            <Text size="xs" c="dimmed">Completed</Text>
-            <Text size="xs" fw={500} c="dark.4">
+            <Text size="xs" c="var(--claude-stone)">Completed</Text>
+            <Text size="xs" fw={500} c="var(--claude-charcoal)">
               {session.endedAt
                 ? new Date(session.endedAt).toLocaleString(undefined, {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -140,7 +121,7 @@ function SessionItem({
                 : '—'}
             </Text>
           </Box>
-          <ThemeIcon size={32} radius="xl" variant="light" color="gray">
+          <ThemeIcon size={32} radius="md" variant="light" color="parchment">
             <IconChevronRight size={16} />
           </ThemeIcon>
         </Group>
@@ -153,8 +134,7 @@ function LoadingSkeleton() {
   return (
     <Stack gap="md">
       {Array.from({ length: 5 }).map((_, i) => (
-        <Paper key={i} shadow="sm" radius="lg" withBorder style={{ overflow: 'hidden' }}>
-          <Skeleton height={3} radius={0} />
+        <Paper key={i} radius="lg" withBorder style={{ overflow: 'hidden' }}>
           <Group p="lg" justify="space-between">
             <Group gap="md" style={{ flex: 1 }}>
               <Skeleton circle height={44} />
@@ -168,34 +148,6 @@ function LoadingSkeleton() {
         </Paper>
       ))}
     </Stack>
-  );
-}
-
-function EmptyState() {
-  return (
-    <Center style={{ minHeight: 360 }}>
-      <Stack align="center" gap="lg">
-        <Box
-          style={{
-            width: 100,
-            height: 100,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <IconArchive size={44} style={{ color: '#9ba3c2' }} />
-        </Box>
-        <Box style={{ textAlign: 'center' }}>
-          <Title order={4} c="dark.4" mb={4}>No completed sessions</Title>
-          <Text c="dimmed" size="sm" maw={320} style={{ lineHeight: 1.6 }}>
-            Once you complete a simulation session, your results and conversation history will appear here.
-          </Text>
-        </Box>
-      </Stack>
-    </Center>
   );
 }
 
@@ -255,89 +207,18 @@ export default function HistoryPage() {
 
   return (
     <Stack gap="xl">
-      {/* ── Page header ── */}
-      <Box>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'violet', to: 'grape' }}>
-            <IconHistory size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>History & Performance</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          Review your past simulation attempts and track progress
-        </Text>
-      </Box>
+      <PageHeader
+        title="History & Performance"
+        subtitle="Review your past simulation attempts and track progress"
+      />
 
       {/* ── Stats overview ── */}
       {!loading && allCompleted.length > 0 && (
         <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-          <Paper
-            radius="lg" p="md"
-            style={{ background: 'linear-gradient(135deg, #f5f0ff 0%, #ede5ff 100%)', border: '1px solid #ddd0ff' }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Total
-                </Text>
-                <Title order={2} c="violet.7" mt={2}>{allCompleted.length}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="violet">
-                <IconHistory size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
-
-          <Paper
-            radius="lg" p="md"
-            style={{ background: 'linear-gradient(135deg, #eef5ff 0%, #e0edff 100%)', border: '1px solid #c9deff' }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Practice
-                </Text>
-                <Title order={2} c="blue.7" mt={2}>{practiceCount}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="blue">
-                <IconBook2 size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
-
-          <Paper
-            radius="lg" p="md"
-            style={{ background: 'linear-gradient(135deg, #fff7f0 0%, #fff0e6 100%)', border: '1px solid #ffdfc4' }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Assessment
-                </Text>
-                <Title order={2} c="orange.7" mt={2}>{assessmentCount}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="orange">
-                <IconClipboardCheck size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
-
-          <Paper
-            radius="lg" p="md"
-            style={{ background: 'linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%)', border: '1px solid #c6f6d5' }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Avg. Duration
-                </Text>
-                <Title order={2} c="teal.7" mt={2}>{avgDuration}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="teal">
-                <IconHourglass size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
+          <StatCard label="Total" value={allCompleted.length} icon={<IconHistory size={22} />} />
+          <StatCard label="Practice" value={practiceCount} icon={<IconBook2 size={22} />} accent="parchment" />
+          <StatCard label="Assessment" value={assessmentCount} icon={<IconClipboardCheck size={22} />} />
+          <StatCard label="Avg. Duration" value={avgDuration} icon={<IconHourglass size={22} />} accent="parchment" />
         </SimpleGrid>
       )}
 
@@ -356,6 +237,7 @@ export default function HistoryPage() {
             value={modeFilter}
             onChange={setModeFilter}
             radius="xl"
+            color="terracotta"
             data={[
               { label: `All (${allCompleted.length})`, value: 'all' },
               { label: `Practice (${practiceCount})`, value: 'practice' },
@@ -369,14 +251,18 @@ export default function HistoryPage() {
       {loading ? (
         <LoadingSkeleton />
       ) : allCompleted.length === 0 ? (
-        <EmptyState />
+        <EmptyStateCmp
+          icon={<IconArchive size={28} />}
+          title="No completed sessions"
+          description="Once you complete a simulation session, your results and conversation history will appear here."
+        />
       ) : completedSessions.length === 0 ? (
         <Center style={{ minHeight: 200 }}>
           <Stack align="center" gap="sm">
-            <ThemeIcon size={52} radius="xl" variant="light" color="gray">
+            <ThemeIcon size={52} radius="lg" variant="light" color="parchment">
               <IconSearch size={26} />
             </ThemeIcon>
-            <Text c="dimmed" size="sm">No sessions match your filters</Text>
+            <Text c="var(--claude-stone)" size="sm">No sessions match your filters</Text>
           </Stack>
         </Center>
       ) : (

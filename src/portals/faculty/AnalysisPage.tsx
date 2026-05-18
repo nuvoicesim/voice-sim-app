@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
-  Title, Text, Stack, SimpleGrid, Paper, Box, Group,
+  Text, Stack, SimpleGrid, Paper, Box, Group,
   ThemeIcon, Skeleton, RingProgress, Center,
 } from '@mantine/core';
 import {
-  IconChartBar, IconFilter, IconActivity, IconCircleCheck,
+  IconFilter, IconActivity, IconCircleCheck,
 } from '@tabler/icons-react';
 import { analyticsApi } from '../../api/analyticsApi';
+import { PageHeader, SectionCard } from '../../components/design';
 
 function LoadingSkeleton() {
   return (
@@ -49,61 +50,55 @@ export default function AnalysisPage() {
 
   return (
     <Stack gap="xl">
-      {/* ── Header ── */}
-      <Box>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'grape', to: 'violet' }}>
-            <IconChartBar size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>Analysis</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          Cohort performance analysis and insights
-        </Text>
-      </Box>
+      <PageHeader
+        title="Analysis"
+        subtitle="Cohort performance analysis and insights"
+      />
 
-      {/* ── Cards ── */}
       <SimpleGrid cols={1} spacing="lg">
-        {/* Completion Funnel */}
-        <Paper radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
-          <Group gap="xs" mb="lg">
-            <ThemeIcon size={26} radius="xl" variant="light" color="indigo">
-              <IconFilter size={14} />
-            </ThemeIcon>
-            <Text fw={600} size="sm">Completion Funnel</Text>
-          </Group>
-
+        <SectionCard
+          title={
+            <Group gap="xs">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+                <IconFilter size={14} />
+              </ThemeIcon>
+              <Text fw={500} size="md" c="var(--claude-near-black)">Completion Funnel</Text>
+            </Group>
+          }
+        >
           <Stack align="center" gap="md">
             <RingProgress
               size={140}
               thickness={14}
               roundCaps
-              sections={[{ value: completionRate, color: 'var(--mantine-color-indigo-6)' }]}
+              sections={[{ value: completionRate, color: 'var(--claude-terracotta)' }]}
               label={
                 <Stack align="center" gap={0}>
-                  <Text fw={800} size="xl" c="indigo.7">{completionRate}%</Text>
-                  <Text size="xs" c="dimmed">Rate</Text>
+                  <Text fw={500} size="xl" c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+                    {completionRate}%
+                  </Text>
+                  <Text size="xs" c="var(--claude-stone)">Rate</Text>
                 </Stack>
               }
             />
             <SimpleGrid cols={2} spacing="md" style={{ width: '100%' }}>
-              <Paper radius="md" p="sm" style={{ background: '#f8f9fb', textAlign: 'center' }}>
+              <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)', textAlign: 'center' }}>
                 <Group gap={4} justify="center" mb={2}>
-                  <IconActivity size={13} style={{ color: 'var(--mantine-color-blue-5)' }} />
-                  <Text size="xs" c="dimmed" fw={500}>Total</Text>
+                  <IconActivity size={13} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" c="var(--claude-olive)" fw={500}>Total</Text>
                 </Group>
-                <Text fw={700} size="lg" c="blue.7">{total}</Text>
+                <Text fw={500} size="lg" c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>{total}</Text>
               </Paper>
-              <Paper radius="md" p="sm" style={{ background: '#f8f9fb', textAlign: 'center' }}>
+              <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)', textAlign: 'center' }}>
                 <Group gap={4} justify="center" mb={2}>
-                  <IconCircleCheck size={13} style={{ color: 'var(--mantine-color-teal-5)' }} />
-                  <Text size="xs" c="dimmed" fw={500}>Completed</Text>
+                  <IconCircleCheck size={13} style={{ color: 'var(--claude-terracotta)' }} />
+                  <Text size="xs" c="var(--claude-olive)" fw={500}>Completed</Text>
                 </Group>
-                <Text fw={700} size="lg" c="teal.7">{completed}</Text>
+                <Text fw={500} size="lg" c="var(--claude-terracotta)" style={{ fontFamily: 'Georgia, serif' }}>{completed}</Text>
               </Paper>
             </SimpleGrid>
           </Stack>
-        </Paper>
+        </SectionCard>
       </SimpleGrid>
     </Stack>
   );

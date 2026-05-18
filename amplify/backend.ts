@@ -1,5 +1,33 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineBackend } from "@aws-amplify/backend";
 import { RemovalPolicy, Stack } from "aws-cdk-lib";
+
+// Load .env.local (and .env as a fallback) from the repo root before any
+// process.env reads below. Explicit shell env vars always win, so CI/Amplify
+// Hosting can still inject overrides. The files are gitignored — see README.
+function loadDotEnv(filename: string) {
+  const path = resolve(process.cwd(), filename);
+  if (!existsSync(path)) return;
+  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!key || key in process.env) continue;
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+loadDotEnv(".env.local");
+loadDotEnv(".env");
 import {
   AuthorizationType,
   CognitoUserPoolsAuthorizer,
@@ -25,6 +53,13 @@ import { assignmentFunction } from "./functions/assignment-function/resource";
 import { sessionFunction } from "./functions/session-function/resource";
 import { surveyTemplateFunction } from "./functions/survey-template-function/resource";
 import { analyticsFunction } from "./functions/analytics-function/resource";
+// Course-LMS feature functions:
+import { courseFunction } from "./functions/course-function/resource";
+import { moduleFunction } from "./functions/module-function/resource";
+import { moduleItemFunction } from "./functions/module-item-function/resource";
+import { surveyInstanceFunction } from "./functions/survey-instance-function/resource";
+import { eventLogFunction } from "./functions/event-log-function/resource";
+import { migrationFunction } from "./functions/migration-function/resource";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
@@ -49,12 +84,18 @@ const backend = defineBackend({
   sessionFunction,
   surveyTemplateFunction,
   analyticsFunction,
+  courseFunction,
+  moduleFunction,
+  moduleItemFunction,
+  surveyInstanceFunction,
+  eventLogFunction,
+  migrationFunction,
 });
 
 const storageStack = backend.createStack("unity-storage-stack");
 const unityUploadAllowedOrigins = (
   process.env.UNITY_BUILD_UPLOAD_ALLOWED_ORIGINS ??
-  "https://www.voice-sim.org,https://voice-sim.org,https://sandbox.d1yrflacecv45f.amplifyapp.com"
+  "https://www.voice-sim.org,https://voice-sim.org,https://sandbox.d1yrflacecv45f.amplifyapp.com,http://localhost:5173,http://localhost:5174,http://localhost:4173"
 )
   .split(",")
   .map((origin) => origin.trim())
@@ -178,6 +219,212 @@ backend.analyticsFunction.addEnvironment("EVALUATION_TABLE_NAME", evaluationTabl
 backend.analyticsFunction.addEnvironment("ASSIGNMENT_TABLE_NAME", assignmentTable.tableName);
 backend.analyticsFunction.addEnvironment("SURVEY_RESPONSE_TABLE_NAME", surveyResponseTable.tableName);
 
+// ─── Canvas-like LMS tables ───
+const courseTable = backend.data.resources.tables["Course"];
+const courseInstructorTable = backend.data.resources.tables["CourseInstructor"];
+const courseEnrollmentTable = backend.data.resources.tables["CourseEnrollment"];
+const moduleTable = backend.data.resources.tables["Module"];
+const moduleItemTable = backend.data.resources.tables["ModuleItem"];
+const surveyInstanceTable = backend.data.resources.tables["SurveyInstance"];
+const studentItemProgressTable = backend.data.resources.tables["StudentItemProgress"];
+const studentGroupAssignmentTable = backend.data.resources.tables["StudentGroupAssignment"];
+const reviewerAssignmentTable = backend.data.resources.tables["ReviewerAssignment"];
+const reviewerFeedbackTable = backend.data.resources.tables["ReviewerFeedback"];
+const eventLogTable = backend.data.resources.tables["EventLog"];
+const migrationLogTable = backend.data.resources.tables["MigrationLog"];
+const consentDecisionTable = backend.data.resources.tables["ConsentDecision"];
+
+// Helper: attach common course-auth env vars to a function so requireCourseInstructor/etc. work.
+function attachCourseAuthEnv(fn: any) {
+  fn.addEnvironment("COURSE_TABLE_NAME", courseTable.tableName);
+  fn.addEnvironment("COURSE_INSTRUCTOR_TABLE_NAME", courseInstructorTable.tableName);
+  fn.addEnvironment("COURSE_ENROLLMENT_TABLE_NAME", courseEnrollmentTable.tableName);
+  fn.addEnvironment("MODULE_TABLE_NAME", moduleTable.tableName);
+  fn.addEnvironment("MODULE_ITEM_TABLE_NAME", moduleItemTable.tableName);
+  fn.addEnvironment("ASSIGNMENT_TABLE_NAME", assignmentTable.tableName);
+  fn.addEnvironment("SESSION_TABLE_NAME", sessionTable.tableName);
+}
+function grantCourseAuthReadTables(fn: any) {
+  courseTable.grantReadData(fn.resources.lambda);
+  courseInstructorTable.grantReadData(fn.resources.lambda);
+  courseEnrollmentTable.grantReadData(fn.resources.lambda);
+}
+
+// course-function — RW course/instructor/enrollment.
+// USER_POOL_ID env + cognito-idp:AdminGetUser are added by the loop below; we add
+// the extra cognito-idp:ListUsers here for email -> sub resolution.
+courseTable.grantReadWriteData(backend.courseFunction.resources.lambda);
+courseInstructorTable.grantReadWriteData(backend.courseFunction.resources.lambda);
+courseEnrollmentTable.grantReadWriteData(backend.courseFunction.resources.lambda);
+studentGroupAssignmentTable.grantReadData(backend.courseFunction.resources.lambda);
+backend.courseFunction.addEnvironment(
+  "STUDENT_GROUP_ASSIGNMENT_TABLE_NAME",
+  studentGroupAssignmentTable.tableName
+);
+attachCourseAuthEnv(backend.courseFunction);
+backend.courseFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["cognito-idp:ListUsers"],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  })
+);
+
+// module-function — RW Module, R Course/CourseInstructor, RW ModuleItem (cascade delete)
+moduleTable.grantReadWriteData(backend.moduleFunction.resources.lambda);
+moduleItemTable.grantReadWriteData(backend.moduleFunction.resources.lambda);
+grantCourseAuthReadTables(backend.moduleFunction);
+attachCourseAuthEnv(backend.moduleFunction);
+
+// module-item-function — RW ModuleItem/StudentItemProgress/StudentGroupAssignment/ReviewerAssignment/ReviewerFeedback
+moduleItemTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+studentItemProgressTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+studentGroupAssignmentTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+reviewerAssignmentTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+reviewerFeedbackTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+surveyInstanceTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+eventLogTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+moduleTable.grantReadData(backend.moduleItemFunction.resources.lambda);
+assignmentTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+sessionTable.grantReadData(backend.moduleItemFunction.resources.lambda);
+turnTable.grantReadData(backend.moduleItemFunction.resources.lambda);
+evaluationTable.grantReadData(backend.moduleItemFunction.resources.lambda);
+grantCourseAuthReadTables(backend.moduleItemFunction);
+attachCourseAuthEnv(backend.moduleItemFunction);
+backend.moduleItemFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
+);
+backend.moduleItemFunction.addEnvironment(
+  "STUDENT_GROUP_ASSIGNMENT_TABLE_NAME",
+  studentGroupAssignmentTable.tableName
+);
+backend.moduleItemFunction.addEnvironment(
+  "REVIEWER_ASSIGNMENT_TABLE_NAME",
+  reviewerAssignmentTable.tableName
+);
+backend.moduleItemFunction.addEnvironment(
+  "REVIEWER_FEEDBACK_TABLE_NAME",
+  reviewerFeedbackTable.tableName
+);
+backend.moduleItemFunction.addEnvironment(
+  "SURVEY_INSTANCE_TABLE_NAME",
+  surveyInstanceTable.tableName
+);
+backend.moduleItemFunction.addEnvironment("TURN_TABLE_NAME", turnTable.tableName);
+backend.moduleItemFunction.addEnvironment("EVALUATION_TABLE_NAME", evaluationTable.tableName);
+backend.moduleItemFunction.addEnvironment("EVENT_LOG_TABLE_NAME", eventLogTable.tableName);
+// Consent decisions (3 new routes live in module-item-function):
+consentDecisionTable.grantReadWriteData(backend.moduleItemFunction.resources.lambda);
+backend.moduleItemFunction.addEnvironment(
+  "CONSENT_DECISION_TABLE_NAME",
+  consentDecisionTable.tableName
+);
+
+// survey-instance-function — RW SurveyInstance, R/W ReviewerFeedback (reveal flips), R SurveyTemplate
+surveyInstanceTable.grantReadWriteData(backend.surveyInstanceFunction.resources.lambda);
+reviewerFeedbackTable.grantReadWriteData(backend.surveyInstanceFunction.resources.lambda);
+surveyTemplateTable.grantReadData(backend.surveyInstanceFunction.resources.lambda);
+moduleItemTable.grantReadData(backend.surveyInstanceFunction.resources.lambda);
+// Faculty roster endpoint reads Assignment to resolve courseId / wrapping moduleItemId.
+assignmentTable.grantReadData(backend.surveyInstanceFunction.resources.lambda);
+studentItemProgressTable.grantReadWriteData(backend.surveyInstanceFunction.resources.lambda);
+eventLogTable.grantReadWriteData(backend.surveyInstanceFunction.resources.lambda);
+grantCourseAuthReadTables(backend.surveyInstanceFunction);
+attachCourseAuthEnv(backend.surveyInstanceFunction);
+backend.surveyInstanceFunction.addEnvironment(
+  "SURVEY_INSTANCE_TABLE_NAME",
+  surveyInstanceTable.tableName
+);
+backend.surveyInstanceFunction.addEnvironment(
+  "SURVEY_TEMPLATE_TABLE_NAME",
+  surveyTemplateTable.tableName
+);
+backend.surveyInstanceFunction.addEnvironment(
+  "REVIEWER_FEEDBACK_TABLE_NAME",
+  reviewerFeedbackTable.tableName
+);
+backend.surveyInstanceFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
+);
+backend.surveyInstanceFunction.addEnvironment("EVENT_LOG_TABLE_NAME", eventLogTable.tableName);
+// Consent hard-gate on survey instance access:
+consentDecisionTable.grantReadData(backend.surveyInstanceFunction.resources.lambda);
+backend.surveyInstanceFunction.addEnvironment(
+  "CONSENT_DECISION_TABLE_NAME",
+  consentDecisionTable.tableName
+);
+
+// event-log-function — RW EventLog, R Course/CourseEnrollment for auth
+eventLogTable.grantReadWriteData(backend.eventLogFunction.resources.lambda);
+grantCourseAuthReadTables(backend.eventLogFunction);
+attachCourseAuthEnv(backend.eventLogFunction);
+backend.eventLogFunction.addEnvironment("EVENT_LOG_TABLE_NAME", eventLogTable.tableName);
+
+// migration-function — RW everything new + Assignment + read SimulationSession/SessionEvaluation
+courseTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+courseInstructorTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+courseEnrollmentTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+moduleTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+moduleItemTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+studentItemProgressTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+migrationLogTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+assignmentTable.grantReadWriteData(backend.migrationFunction.resources.lambda);
+enrollmentTable.grantReadData(backend.migrationFunction.resources.lambda);
+sessionTable.grantReadData(backend.migrationFunction.resources.lambda);
+evaluationTable.grantReadData(backend.migrationFunction.resources.lambda);
+backend.migrationFunction.addEnvironment("ASSIGNMENT_TABLE_NAME", assignmentTable.tableName);
+backend.migrationFunction.addEnvironment("ENROLLMENT_TABLE_NAME", enrollmentTable.tableName);
+backend.migrationFunction.addEnvironment("SESSION_TABLE_NAME", sessionTable.tableName);
+backend.migrationFunction.addEnvironment("EVALUATION_TABLE_NAME", evaluationTable.tableName);
+backend.migrationFunction.addEnvironment("COURSE_TABLE_NAME", courseTable.tableName);
+backend.migrationFunction.addEnvironment(
+  "COURSE_INSTRUCTOR_TABLE_NAME",
+  courseInstructorTable.tableName
+);
+backend.migrationFunction.addEnvironment(
+  "COURSE_ENROLLMENT_TABLE_NAME",
+  courseEnrollmentTable.tableName
+);
+backend.migrationFunction.addEnvironment("MODULE_TABLE_NAME", moduleTable.tableName);
+backend.migrationFunction.addEnvironment("MODULE_ITEM_TABLE_NAME", moduleItemTable.tableName);
+backend.migrationFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
+);
+backend.migrationFunction.addEnvironment(
+  "MIGRATION_LOG_TABLE_NAME",
+  migrationLogTable.tableName
+);
+
+// Extend session-function with course-LMS env (needed for the markCourseProgressCompleted hook).
+moduleItemTable.grantReadData(backend.sessionFunction.resources.lambda);
+studentItemProgressTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
+eventLogTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
+backend.sessionFunction.addEnvironment("MODULE_ITEM_TABLE_NAME", moduleItemTable.tableName);
+backend.sessionFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
+);
+backend.sessionFunction.addEnvironment("EVENT_LOG_TABLE_NAME", eventLogTable.tableName);
+
+// Extend llm-scoring-function to mirror AI feedback into ReviewerFeedback after writing SessionEvaluation.
+moduleItemTable.grantReadData(backend.llmScoringFunction.resources.lambda);
+studentItemProgressTable.grantReadWriteData(backend.llmScoringFunction.resources.lambda);
+reviewerFeedbackTable.grantReadWriteData(backend.llmScoringFunction.resources.lambda);
+eventLogTable.grantReadWriteData(backend.llmScoringFunction.resources.lambda);
+backend.llmScoringFunction.addEnvironment("SESSION_TABLE_NAME", sessionTable.tableName);
+backend.llmScoringFunction.addEnvironment("MODULE_ITEM_TABLE_NAME", moduleItemTable.tableName);
+backend.llmScoringFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
+);
+backend.llmScoringFunction.addEnvironment(
+  "REVIEWER_FEEDBACK_TABLE_NAME",
+  reviewerFeedbackTable.tableName
+);
+backend.llmScoringFunction.addEnvironment("EVENT_LOG_TABLE_NAME", eventLogTable.tableName);
+
 // Grant new tables to runtime functions (llm-dialogue, llm-scoring, tts) for context resolution
 const runtimeFunctions = [backend.llmDialogueFunction, backend.llmScoringFunction, backend.ttsFunction];
 for (const fn of runtimeFunctions) {
@@ -223,6 +470,12 @@ for (const fn of [
   backend.sceneCatalogFunction,
   backend.patientProfileFunction,
   backend.unityBuildFunction,
+  backend.courseFunction,
+  backend.moduleFunction,
+  backend.moduleItemFunction,
+  backend.surveyInstanceFunction,
+  backend.eventLogFunction,
+  backend.migrationFunction,
 ]) {
   fn.addEnvironment("USER_POOL_ID", userPoolId);
   fn.resources.lambda.addToRolePolicy(
@@ -545,6 +798,11 @@ assignmentStatusPath.addMethod("PUT", assignmentLambdaIntegration, cognitoMethod
 const assignmentSessionsPath = assignmentItemPath.addResource("sessions");
 assignmentSessionsPath.addMethod("GET", sessionLambdaIntegration, cognitoMethodOptions);
 
+// /assignments/{assignmentId}/survey-instances — faculty roster of survey responses
+// for sibling survey/debrief module items in the assignment's module. Defined here
+// (above the LMS section) because the integration is created later, so we add the
+// route after surveyInstanceLambdaIntegration is initialized.
+
 // /sessions
 const sessionsPath = myRestApi.root.addResource("sessions");
 sessionsPath.addMethod("GET", sessionLambdaIntegration, cognitoMethodOptions);
@@ -588,6 +846,153 @@ analyticsSurveysPath.addMethod("GET", analyticsLambdaIntegration, cognitoMethodO
 const analyticsStudentPath = analyticsPath.addResource("student");
 const analyticsStudentItemPath = analyticsStudentPath.addResource("{studentUserId}");
 analyticsStudentItemPath.addMethod("GET", analyticsLambdaIntegration, cognitoMethodOptions);
+
+// ─── Canvas-like LMS routes ───
+const courseLambdaIntegration = new LambdaIntegration(backend.courseFunction.resources.lambda);
+const moduleLambdaIntegration = new LambdaIntegration(backend.moduleFunction.resources.lambda);
+const moduleItemLambdaIntegration = new LambdaIntegration(
+  backend.moduleItemFunction.resources.lambda
+);
+const surveyInstanceLambdaIntegration = new LambdaIntegration(
+  backend.surveyInstanceFunction.resources.lambda
+);
+const eventLogLambdaIntegration = new LambdaIntegration(backend.eventLogFunction.resources.lambda);
+const migrationLambdaIntegration = new LambdaIntegration(
+  backend.migrationFunction.resources.lambda
+);
+
+// /courses
+const coursesPath = myRestApi.root.addResource("courses");
+coursesPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
+coursesPath.addMethod("POST", courseLambdaIntegration, cognitoMethodOptions);
+const courseItemPath = coursesPath.addResource("{courseId}");
+courseItemPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
+courseItemPath.addMethod("PUT", courseLambdaIntegration, cognitoMethodOptions);
+courseItemPath.addMethod("DELETE", courseLambdaIntegration, cognitoMethodOptions);
+const courseStatusPath = courseItemPath.addResource("status");
+courseStatusPath.addMethod("PUT", courseLambdaIntegration, cognitoMethodOptions);
+const courseInstructorsPath = courseItemPath.addResource("instructors");
+courseInstructorsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
+courseInstructorsPath.addMethod("POST", courseLambdaIntegration, cognitoMethodOptions);
+const courseInstructorItemPath = courseInstructorsPath.addResource("{facultyUserId}");
+courseInstructorItemPath.addMethod("DELETE", courseLambdaIntegration, cognitoMethodOptions);
+const courseInstructorRolePath = courseInstructorItemPath.addResource("role");
+courseInstructorRolePath.addMethod("PUT", courseLambdaIntegration, cognitoMethodOptions);
+const courseMyGroupsPath = courseItemPath.addResource("my-groups");
+courseMyGroupsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
+const courseEnrollmentsPath = courseItemPath.addResource("enrollments");
+courseEnrollmentsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
+courseEnrollmentsPath.addMethod("POST", courseLambdaIntegration, cognitoMethodOptions);
+const courseEnrollmentItemPath = courseEnrollmentsPath.addResource("{studentUserId}");
+courseEnrollmentItemPath.addMethod("DELETE", courseLambdaIntegration, cognitoMethodOptions);
+
+// /courses/{courseId}/modules
+const courseModulesPath = courseItemPath.addResource("modules");
+courseModulesPath.addMethod("GET", moduleLambdaIntegration, cognitoMethodOptions);
+courseModulesPath.addMethod("POST", moduleLambdaIntegration, cognitoMethodOptions);
+const courseModulesReorderPath = courseModulesPath.addResource("reorder");
+courseModulesReorderPath.addMethod("POST", moduleLambdaIntegration, cognitoMethodOptions);
+
+// /modules/{moduleId}
+const modulesPath = myRestApi.root.addResource("modules");
+const moduleItemPath2 = modulesPath.addResource("{moduleId}");
+moduleItemPath2.addMethod("GET", moduleLambdaIntegration, cognitoMethodOptions);
+moduleItemPath2.addMethod("PUT", moduleLambdaIntegration, cognitoMethodOptions);
+moduleItemPath2.addMethod("DELETE", moduleLambdaIntegration, cognitoMethodOptions);
+const moduleReorderPath = moduleItemPath2.addResource("reorder");
+moduleReorderPath.addMethod("POST", moduleLambdaIntegration, cognitoMethodOptions);
+
+// /modules/{moduleId}/items
+const moduleItemsPath = moduleItemPath2.addResource("items");
+moduleItemsPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemsPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}
+const moduleItemsRoot = myRestApi.root.addResource("module-items");
+const moduleItemEntityPath = moduleItemsRoot.addResource("{itemId}");
+moduleItemEntityPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemEntityPath.addMethod("PUT", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemEntityPath.addMethod("DELETE", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/progress
+const moduleItemProgressPath = moduleItemEntityPath.addResource("progress");
+moduleItemProgressPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemProgressPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/randomize
+const moduleItemRandomizePath = moduleItemEntityPath.addResource("randomize");
+moduleItemRandomizePath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/reviewers
+const moduleItemReviewersPath = moduleItemEntityPath.addResource("reviewers");
+moduleItemReviewersPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemReviewersPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/feedback
+const moduleItemFeedbackPath = moduleItemEntityPath.addResource("feedback");
+moduleItemFeedbackPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemFeedbackPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/best-session
+const moduleItemBestSessionPath = moduleItemEntityPath.addResource("best-session");
+moduleItemBestSessionPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/sub-questions
+const moduleItemSubQuestionsPath = moduleItemEntityPath.addResource("sub-questions");
+moduleItemSubQuestionsPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/sub-answer
+const moduleItemSubAnswerPath = moduleItemEntityPath.addResource("sub-answer");
+moduleItemSubAnswerPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/consent-decision  (consent item: student records agree/decline)
+const moduleItemConsentDecisionPath = moduleItemEntityPath.addResource("consent-decision");
+moduleItemConsentDecisionPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+moduleItemConsentDecisionPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /courses/{courseId}/consent-decisions  (instructor/admin only roster export — handled
+// by module-item-function despite the courses/* path, see plan)
+const courseConsentDecisionsPath = courseItemPath.addResource("consent-decisions");
+courseConsentDecisionsPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /module-items/{itemId}/survey-instance
+const moduleItemSurveyInstancePath = moduleItemEntityPath.addResource("survey-instance");
+moduleItemSurveyInstancePath.addMethod("GET", surveyInstanceLambdaIntegration, cognitoMethodOptions);
+moduleItemSurveyInstancePath.addMethod("PUT", surveyInstanceLambdaIntegration, cognitoMethodOptions);
+const moduleItemSurveyInstanceSubmitPath = moduleItemSurveyInstancePath.addResource("submit");
+moduleItemSurveyInstanceSubmitPath.addMethod(
+  "POST",
+  surveyInstanceLambdaIntegration,
+  cognitoMethodOptions
+);
+
+// /assignments/{assignmentId}/survey-instances — faculty roster of survey responses
+const assignmentSurveyInstancesPath = assignmentItemPath.addResource("survey-instances");
+assignmentSurveyInstancesPath.addMethod(
+  "GET",
+  surveyInstanceLambdaIntegration,
+  cognitoMethodOptions
+);
+
+// /survey-templates/{surveyTemplateId} — extend with PUT/DELETE
+const surveyTemplateItemPathExt = surveyTemplateItemPath; // already declared above
+surveyTemplateItemPathExt.addMethod("PUT", surveyTemplateLambdaIntegration, cognitoMethodOptions);
+surveyTemplateItemPathExt.addMethod(
+  "DELETE",
+  surveyTemplateLambdaIntegration,
+  cognitoMethodOptions
+);
+
+// /events
+const eventsPath = myRestApi.root.addResource("events");
+eventsPath.addMethod("GET", eventLogLambdaIntegration, cognitoMethodOptions);
+eventsPath.addMethod("POST", eventLogLambdaIntegration, cognitoMethodOptions);
+
+// /admin/migrate-to-courses
+const adminPath = myRestApi.root.addResource("admin");
+const adminMigratePath = adminPath.addResource("migrate-to-courses");
+adminMigratePath.addMethod("GET", migrationLambdaIntegration, cognitoMethodOptions);
+adminMigratePath.addMethod("POST", migrationLambdaIntegration, cognitoMethodOptions);
 
 // add outputs to the configuration file
 backend.addOutput({

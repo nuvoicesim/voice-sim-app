@@ -32,6 +32,10 @@ const UNITY_BUILD_TABLE = process.env.UNITY_BUILD_TABLE_NAME;
 const ENROLLMENT_TABLE = process.env.ENROLLMENT_TABLE_NAME;
 const TURN_TABLE = process.env.TURN_TABLE_NAME;
 const EVALUATION_TABLE = process.env.EVALUATION_TABLE_NAME;
+// Course-LMS integration:
+const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME;
+const STUDENT_ITEM_PROGRESS_TABLE = process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME;
+const EVENT_LOG_TABLE = process.env.EVENT_LOG_TABLE_NAME;
 const RUNTIME_TOKEN_SECRET = process.env.RUNTIME_TOKEN_SECRET ?? "";
 const RUNTIME_TOKEN_TTL_SECONDS = Number(process.env.RUNTIME_TOKEN_TTL_SECONDS ?? "1800");
 const UNITY_DEV_BOOTSTRAP_ENABLED = (process.env.UNITY_DEV_BOOTSTRAP_ENABLED ?? "false").toLowerCase() === "true";
@@ -221,7 +225,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // GET /sessions/{sessionId}
     if (method === "GET" && pathParams?.sessionId) {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["student", "faculty", "admin"]);
+      const authError = requireRole(caller, ["student", "faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleGetSession(pathParams.sessionId, caller!);
     }
@@ -229,7 +233,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // GET /assignments/{assignmentId}/sessions
     if (method === "GET" && pathParams?.assignmentId) {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["student", "faculty", "admin"]);
+      const authError = requireRole(caller, ["student", "faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       const params = getQueryParams(event.queryStringParameters);
       return await handleListSessionsByAssignment(pathParams.assignmentId, caller!, params);
@@ -711,7 +715,70 @@ async function handleCompleteSession(sessionId: string, studentUserId: string) {
   };
 
   await putItem(SESSION_TABLE, updated, dynamo);
+
+  // Course-LMS integration: mark StudentItemProgress completed and emit event when
+  // the assignment belongs to a Course ModuleItem. AI evaluation arrives separately
+  // via llm-scoring-function which then updates bestSessionId/Score.
+  await markCourseProgressCompleted(updated.assignmentId, updated.studentUserId, now);
+
   return createResponse(HTTP_STATUS.OK, { session: await enrichSessionForLaunch(updated) });
+}
+
+async function markCourseProgressCompleted(
+  assignmentId: string,
+  studentUserId: string,
+  now: string
+): Promise<void> {
+  if (!ASSIGNMENT_TABLE || !MODULE_ITEM_TABLE || !STUDENT_ITEM_PROGRESS_TABLE) return;
+  try {
+    const assignment = await getItem(ASSIGNMENT_TABLE, { assignmentId }, dynamo);
+    const moduleItemId = assignment?.moduleItemId;
+    const courseId = assignment?.courseId;
+    if (!moduleItemId || !courseId) return;
+    const moduleItem = await getItem(MODULE_ITEM_TABLE, { moduleItemId }, dynamo);
+    if (!moduleItem) return;
+
+    const existing = await getItem(
+      STUDENT_ITEM_PROGRESS_TABLE,
+      { moduleItemId, studentUserId },
+      dynamo
+    );
+    const next = {
+      moduleItemId,
+      studentUserId,
+      courseId,
+      moduleId: moduleItem.moduleId,
+      ...(existing || {}),
+      state: "completed",
+      completedAt: now,
+      startedAt: existing?.startedAt || now,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    await putItem(STUDENT_ITEM_PROGRESS_TABLE, next, dynamo);
+
+    // Emit event.
+    if (EVENT_LOG_TABLE) {
+      const dateKey = now.slice(0, 10);
+      await putItem(
+        EVENT_LOG_TABLE,
+        {
+          eventId: generateId(),
+          studentUserId,
+          studentDateKey: `${studentUserId}#${dateKey}`,
+          courseId,
+          moduleId: moduleItem.moduleId,
+          moduleItemId,
+          eventType: "voice_simulation_completed",
+          payload: { assignmentId },
+          createdAt: now,
+        },
+        dynamo
+      );
+    }
+  } catch (e) {
+    console.warn("markCourseProgressCompleted failed", e);
+  }
 }
 
 async function handleListSessionsByAssignment(

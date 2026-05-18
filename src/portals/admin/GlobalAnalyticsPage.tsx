@@ -1,40 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  Title, Text, SimpleGrid, Paper, Stack, Box, Group,
-  ThemeIcon, Skeleton,
+  Text, SimpleGrid, Paper, Stack, Box, Group, ThemeIcon, Skeleton,
 } from '@mantine/core';
 import {
-  IconChartPie, IconClipboardList, IconActivity, IconCircleCheck,
-  IconUsers,
+  IconClipboardList, IconActivity, IconCircleCheck, IconUsers,
 } from '@tabler/icons-react';
 import { analyticsApi } from '../../api/analyticsApi';
-
-function StatCard({
-  label, value, icon: Icon, color, bgGradient, borderColor,
-}: {
-  label: string;
-  value: string | number;
-  icon: typeof IconActivity;
-  color: string;
-  bgGradient: string;
-  borderColor: string;
-}) {
-  return (
-    <Paper radius="lg" p="md" style={{ background: bgGradient, border: `1px solid ${borderColor}` }}>
-      <Group justify="space-between" align="center">
-        <Box>
-          <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-            {label}
-          </Text>
-          <Title order={2} c={`${color}.7`} mt={2}>{value}</Title>
-        </Box>
-        <ThemeIcon size={42} radius="xl" variant="light" color={color}>
-          <Icon size={22} />
-        </ThemeIcon>
-      </Group>
-    </Paper>
-  );
-}
+import { PageHeader, StatCard, SectionCard } from '../../components/design';
 
 function LoadingSkeleton() {
   return (
@@ -68,9 +40,7 @@ export default function GlobalAnalyticsPage() {
 
   useEffect(() => {
     analyticsApi.platform()
-      .then((p) => {
-        setPlatform(p);
-      })
+      .then((p) => { setPlatform(p); })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
@@ -79,62 +49,28 @@ export default function GlobalAnalyticsPage() {
 
   return (
     <Stack gap="xl">
-      {/* ── Header ── */}
-      <Box>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'pink', to: 'grape' }}>
-            <IconChartPie size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>Global Analytics</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          Cross-cohort platform performance and reliability metrics
-        </Text>
-      </Box>
+      <PageHeader
+        title="Global Analytics"
+        subtitle="Cross-cohort platform performance and reliability metrics"
+      />
 
-      {/* ── Platform metrics ── */}
-      <Paper radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
-        <Group gap="xs" mb="lg">
-          <ThemeIcon size={26} radius="xl" variant="light" color="indigo">
-            <IconActivity size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Platform Metrics</Text>
-        </Group>
+      <SectionCard
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+              <IconActivity size={14} />
+            </ThemeIcon>
+            <Text fw={500} size="md" c="var(--claude-near-black)">Platform Metrics</Text>
+          </Group>
+        }
+      >
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
-          <StatCard
-            label="Assignments"
-            value={platform?.totalAssignments ?? 0}
-            icon={IconClipboardList}
-            color="indigo"
-            bgGradient="linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%)"
-            borderColor="#dbe1ff"
-          />
-          <StatCard
-            label="Sessions"
-            value={platform?.totalSessions ?? 0}
-            icon={IconActivity}
-            color="blue"
-            bgGradient="linear-gradient(135deg, #eef5ff 0%, #e0edff 100%)"
-            borderColor="#c9deff"
-          />
-          <StatCard
-            label="Completed"
-            value={platform?.completedSessions ?? 0}
-            icon={IconCircleCheck}
-            color="teal"
-            bgGradient="linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%)"
-            borderColor="#c6f6d5"
-          />
-          <StatCard
-            label="Students"
-            value={platform?.uniqueStudents ?? 0}
-            icon={IconUsers}
-            color="violet"
-            bgGradient="linear-gradient(135deg, #f5f0ff 0%, #ede5ff 100%)"
-            borderColor="#ddd0ff"
-          />
+          <StatCard label="Assignments" value={platform?.totalAssignments ?? 0} icon={<IconClipboardList size={22} />} />
+          <StatCard label="Sessions" value={platform?.totalSessions ?? 0} icon={<IconActivity size={22} />} accent="parchment" />
+          <StatCard label="Completed" value={platform?.completedSessions ?? 0} icon={<IconCircleCheck size={22} />} />
+          <StatCard label="Students" value={platform?.uniqueStudents ?? 0} icon={<IconUsers size={22} />} accent="parchment" />
         </SimpleGrid>
-      </Paper>
+      </SectionCard>
     </Stack>
   );
 }

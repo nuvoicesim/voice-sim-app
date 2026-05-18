@@ -2,11 +2,11 @@ import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-  Title, Text, Paper, Stack, Badge, Center, Group, Box,
+  Text, Paper, Stack, Badge, Center, Group, Box,
   ThemeIcon, SimpleGrid, Skeleton, Button,
 } from '@mantine/core';
 import {
-  IconFileAnalytics, IconArrowLeft, IconHash, IconBook2,
+  IconArrowLeft, IconHash, IconBook2,
   IconClipboardCheck, IconUser, IconMoodSmile, IconClock,
   IconTrophy, IconStarFilled, IconMessageCircle, IconBolt,
   IconMessages,
@@ -20,24 +20,26 @@ import {
 } from '../../slices/sessionSlice';
 import type { AppDispatch } from '../../store';
 import type { SessionTurn } from '../../slices/sessionSlice';
+import { PageHeader, SectionCard } from '../../components/design';
 
 const MODE_CONFIG: Record<string, { color: string; icon: typeof IconBook2; label: string }> = {
-  practice: { color: 'blue', icon: IconBook2, label: 'Practice' },
-  assessment: { color: 'orange', icon: IconClipboardCheck, label: 'Assessment' },
+  practice: { color: 'parchment', icon: IconBook2, label: 'Practice' },
+  assessment: { color: 'terracotta', icon: IconClipboardCheck, label: 'Assessment' },
 };
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  active: { color: 'yellow', label: 'In Progress' },
-  completed: { color: 'green', label: 'Completed' },
-  abandoned: { color: 'gray', label: 'Abandoned' },
+  active: { color: 'terracotta', label: 'In Progress' },
+  completed: { color: 'terracotta', label: 'Completed' },
+  abandoned: { color: 'parchment', label: 'Abandoned' },
 };
 
+// All performance levels collapse to terracotta (high) or parchment (low)
 const PERF_COLORS: Record<string, string> = {
-  excellent: 'teal',
-  good: 'green',
-  satisfactory: 'blue',
-  'needs improvement': 'orange',
-  poor: 'red',
+  excellent: 'terracotta',
+  good: 'terracotta',
+  satisfactory: 'parchment',
+  'needs improvement': 'parchment',
+  poor: 'parchment',
 };
 
 function formatDateTime(dateStr: string) {
@@ -60,16 +62,9 @@ function formatSpeechDuration(durationMs?: number) {
     return null;
   }
   const totalSeconds = durationMs / 1000;
-  if (totalSeconds < 1) {
-    return `${totalSeconds.toFixed(2)}s`;
-  }
-  if (totalSeconds < 10) {
-    return `${totalSeconds.toFixed(1)}s`;
-  }
-  if (totalSeconds < 60) {
-    return `${Math.round(totalSeconds)}s`;
-  }
-
+  if (totalSeconds < 1) return `${totalSeconds.toFixed(2)}s`;
+  if (totalSeconds < 10) return `${totalSeconds.toFixed(1)}s`;
+  if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.round(totalSeconds % 60);
   return `${minutes}m ${seconds}s`;
@@ -92,14 +87,13 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
 
   return (
     <Stack gap="sm">
-      {/* User (Therapist) */}
       {turn.userText && (
         <Group justify="flex-end" align="flex-start">
           <Stack gap={4} align="flex-end" style={{ maxWidth: '75%' }}>
             {studentSpeechStartAt && (
               <Group gap={4} justify="flex-end" wrap="nowrap">
-                <IconClock size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">
+                <IconClock size={10} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">
                   {formatSpeechStartTime(studentSpeechStartAt)}
                 </Text>
               </Group>
@@ -108,38 +102,37 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
               radius="lg"
               p="sm"
               style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                background: 'var(--claude-terracotta)',
                 borderBottomRightRadius: 4,
               }}
             >
-              <Text size="sm" c="white" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
+              <Text size="sm" c="var(--claude-ivory)" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
               {studentSpeechDuration && (
                 <Group gap={4} mt={4} justify="flex-end" wrap="nowrap">
-                  <IconBolt size={10} style={{ color: 'rgba(255,255,255,0.82)' }} />
-                  <Text size="xs" style={{ color: 'rgba(255,255,255,0.82)' }}>
+                  <IconBolt size={10} style={{ color: 'rgba(250,249,245,0.85)' }} />
+                  <Text size="xs" style={{ color: 'rgba(250,249,245,0.85)' }}>
                     {studentSpeechDuration}
                   </Text>
                 </Group>
               )}
             </Paper>
           </Stack>
-          <ThemeIcon size={34} radius="xl" variant="light" color="indigo" style={{ flexShrink: 0 }}>
+          <ThemeIcon size={34} radius="md" variant="light" color="terracotta" style={{ flexShrink: 0 }}>
             <IconUser size={16} />
           </ThemeIcon>
         </Group>
       )}
 
-      {/* Model (Patient) */}
       {turn.modelText && (
         <Group justify="flex-start" align="flex-start">
-          <ThemeIcon size={34} radius="xl" variant="light" color="orange" style={{ flexShrink: 0 }}>
+          <ThemeIcon size={34} radius="md" variant="light" color="parchment" style={{ flexShrink: 0 }}>
             <IconMoodSmile size={16} />
           </ThemeIcon>
           <Stack gap={4} align="flex-start" style={{ maxWidth: '75%' }}>
             {patientSpeechStartAt && (
               <Group gap={4} wrap="nowrap">
-                <IconClock size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">
+                <IconClock size={10} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">
                   {formatSpeechStartTime(patientSpeechStartAt)}
                 </Text>
               </Group>
@@ -148,15 +141,15 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
               radius="lg"
               p="sm"
               style={{
-                background: '#f4f5f7',
+                background: 'var(--claude-border-cream)',
                 borderBottomLeftRadius: 4,
               }}
             >
-              <Text size="sm" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
+              <Text size="sm" c="var(--claude-near-black)" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
               {patientSpeechDuration && (
                 <Group gap={4} mt={4} wrap="nowrap">
-                  <IconBolt size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                  <Text size="xs" c="dimmed">
+                  <IconBolt size={10} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" c="var(--claude-olive)">
                     {patientSpeechDuration}
                   </Text>
                 </Group>
@@ -197,12 +190,6 @@ function LoadingSkeleton() {
           </Stack>
         </Paper>
       </SimpleGrid>
-      <Paper radius="lg" p="lg" withBorder>
-        <Skeleton height={18} width="30%" mb="lg" />
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} height={60} radius="lg" mb="sm" />
-        ))}
-      </Paper>
     </Stack>
   );
 }
@@ -227,59 +214,49 @@ export default function SessionDetailPage() {
   const ModeIcon = modeConf.icon;
   const duration = formatDuration(session.startedAt, session.endedAt);
   const perfColor = evaluation
-    ? PERF_COLORS[evaluation.performanceLevel.toLowerCase()] || 'gray'
-    : 'gray';
+    ? PERF_COLORS[evaluation.performanceLevel.toLowerCase()] || 'parchment'
+    : 'parchment';
 
   return (
     <Stack gap="xl">
-      {/* ── Page header ── */}
       <Box>
-        <Group gap="md" mb={4}>
-          <Button
-            variant="subtle" color="gray" size="xs" radius="xl" px="sm"
-            leftSection={<IconArrowLeft size={14} />}
-            onClick={() => navigate('/student/history')}
-          >
-            Back
-          </Button>
-        </Group>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
-            <IconFileAnalytics size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>Session Detail</Title>
-        </Group>
-        <Group gap="sm" ml={52}>
-          <Group gap={4}>
-            <IconHash size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-            <Text size="xs" c="dimmed">Attempt {session.attemptNo}</Text>
+        <Button
+          variant="subtle" color="parchment" size="xs" radius="xl" px="sm" mb="md"
+          leftSection={<IconArrowLeft size={14} />}
+          onClick={() => navigate('/student/history')}
+        >
+          Back
+        </Button>
+        <PageHeader title="Session Detail">
+          <Group gap="sm">
+            <Group gap={4}>
+              <IconHash size={12} style={{ color: 'var(--claude-stone)' }} />
+              <Text size="xs" c="var(--claude-olive)">Attempt {session.attemptNo}</Text>
+            </Group>
+            <Badge variant="light" color={modeConf.color} size="xs" radius="xl">
+              {modeConf.label}
+            </Badge>
+            <Badge variant="light" color={statusConf.color} size="xs" radius="xl">
+              {statusConf.label}
+            </Badge>
           </Group>
-          <Badge variant="light" color={modeConf.color} size="xs" radius="xl">
-            {modeConf.label}
-          </Badge>
-          <Badge variant="light" color={statusConf.color} size="xs" radius="xl">
-            {statusConf.label}
-          </Badge>
-        </Group>
+        </PageHeader>
       </Box>
 
-      {/* ── Evaluation + Session info ── */}
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-        {/* Score card */}
-        <Paper
-          radius="lg" p="lg" withBorder
-          style={{ border: '1px solid #edf0f5' }}
+        <SectionCard
+          title={
+            <Group gap="xs">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+                <IconTrophy size={14} />
+              </ThemeIcon>
+              <Text fw={500} size="md" c="var(--claude-near-black)">Evaluation</Text>
+            </Group>
+          }
         >
-          <Group gap="xs" mb="lg">
-            <ThemeIcon size={26} radius="xl" variant="light" color="yellow">
-              <IconTrophy size={14} />
-            </ThemeIcon>
-            <Text fw={600} size="sm">Evaluation</Text>
-          </Group>
-
           {evaluation ? (
             <Stack align="center" gap="md">
-              <ThemeIcon size={54} radius="xl" variant="light" color={perfColor}>
+              <ThemeIcon size={54} radius="lg" variant="light" color={perfColor}>
                 <IconTrophy size={26} />
               </ThemeIcon>
               <Badge variant="light" color={perfColor} size="lg" radius="xl">
@@ -292,14 +269,13 @@ export default function SessionDetailPage() {
                 <Paper
                   radius="md"
                   p="md"
-                  withBorder
                   style={{
                     width: '100%',
-                    background: '#f8f9fb',
-                    border: '1px solid #edf0f5',
+                    background: 'var(--claude-parchment)',
+                    border: '1px solid var(--claude-border-cream)',
                   }}
                 >
-                  <Text size="sm" c="dimmed" ta="left" style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                  <Text size="sm" c="var(--claude-olive)" ta="left" style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                     {evaluation.overallExplanation}
                   </Text>
                 </Paper>
@@ -308,88 +284,84 @@ export default function SessionDetailPage() {
           ) : (
             <Center py="xl">
               <Stack align="center" gap="xs">
-                <ThemeIcon size={44} radius="xl" variant="light" color="gray" style={{ opacity: 0.5 }}>
+                <ThemeIcon size={44} radius="lg" variant="light" color="parchment">
                   <IconTrophy size={22} />
                 </ThemeIcon>
-                <Text size="sm" c="dimmed">No evaluation available</Text>
+                <Text size="sm" c="var(--claude-stone)">No evaluation available</Text>
               </Stack>
             </Center>
           )}
-        </Paper>
+        </SectionCard>
 
-        {/* Session info card */}
-        <Paper
-          radius="lg" p="lg" withBorder
-          style={{ border: '1px solid #edf0f5' }}
+        <SectionCard
+          title={
+            <Group gap="xs">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+                <ModeIcon size={14} />
+              </ThemeIcon>
+              <Text fw={500} size="md" c="var(--claude-near-black)">Session Info</Text>
+            </Group>
+          }
         >
-          <Group gap="xs" mb="lg">
-            <ThemeIcon size={26} radius="xl" variant="light" color="indigo">
-              <ModeIcon size={14} />
-            </ThemeIcon>
-            <Text fw={600} size="sm">Session Info</Text>
-          </Group>
-
           <Stack gap="sm">
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Started</Text>
-                <Text size="xs" fw={500}>{formatDateTime(session.startedAt)}</Text>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Started</Text>
+                <Text size="xs" fw={500} c="var(--claude-near-black)">{formatDateTime(session.startedAt)}</Text>
               </Group>
             </Paper>
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Ended</Text>
-                <Text size="xs" fw={500}>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Ended</Text>
+                <Text size="xs" fw={500} c="var(--claude-near-black)">
                   {session.endedAt ? formatDateTime(session.endedAt) : '—'}
                 </Text>
               </Group>
             </Paper>
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Duration</Text>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Duration</Text>
                 <Group gap={4}>
-                  <IconClock size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                  <Text size="xs" fw={500}>{duration}</Text>
+                  <IconClock size={12} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" fw={500} c="var(--claude-near-black)">{duration}</Text>
                 </Group>
               </Group>
             </Paper>
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Conversation Turns</Text>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Conversation Turns</Text>
                 <Group gap={4}>
-                  <IconMessageCircle size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                  <Text size="xs" fw={500}>{turns.length}</Text>
+                  <IconMessageCircle size={12} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" fw={500} c="var(--claude-near-black)">{turns.length}</Text>
                 </Group>
               </Group>
             </Paper>
           </Stack>
-        </Paper>
+        </SectionCard>
       </SimpleGrid>
 
-      {/* ── Conversation history ── */}
-      <Paper
-        radius="lg" p="lg" withBorder
-        style={{ border: '1px solid #edf0f5' }}
+      <SectionCard
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+              <IconMessages size={14} />
+            </ThemeIcon>
+            <Text fw={500} size="md" c="var(--claude-near-black)">Conversation History</Text>
+            {turns.length > 0 && (
+              <Badge variant="light" color="parchment" size="sm" radius="xl">
+                {turns.length} turns
+              </Badge>
+            )}
+          </Group>
+        }
       >
-        <Group gap="xs" mb="lg">
-          <ThemeIcon size={26} radius="xl" variant="light" color="grape">
-            <IconMessages size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Conversation History</Text>
-          {turns.length > 0 && (
-            <Badge variant="light" color="gray" size="sm" radius="xl">
-              {turns.length} turns
-            </Badge>
-          )}
-        </Group>
-
         {turns.length === 0 ? (
           <Center py="xl">
             <Stack align="center" gap="xs">
-              <ThemeIcon size={44} radius="xl" variant="light" color="gray" style={{ opacity: 0.5 }}>
+              <ThemeIcon size={44} radius="lg" variant="light" color="parchment">
                 <IconMessages size={22} />
               </ThemeIcon>
-              <Text size="sm" c="dimmed">No conversation turns recorded</Text>
+              <Text size="sm" c="var(--claude-stone)">No conversation turns recorded</Text>
             </Stack>
           </Center>
         ) : (
@@ -399,7 +371,7 @@ export default function SessionDetailPage() {
             ))}
           </Stack>
         )}
-      </Paper>
+      </SectionCard>
     </Stack>
   );
 }

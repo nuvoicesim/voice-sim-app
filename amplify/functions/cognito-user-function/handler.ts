@@ -62,22 +62,24 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleUpdateRole(pathParams.userId, event.body);
     }
 
-    // GET /cognito-user?list=true — list all users
+    // GET /cognito-user?list=true — list/search users.
+    // Faculty needs this for email-typeahead when adding students/co-teachers to a course.
     if (method === "GET" && queryParams.list === "true") {
-      const authError = requireRole(caller, ["admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleListUsers(queryParams);
     }
 
     if (method === "GET") {
-      const authError = requireRole(caller, ["admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleGetUser(queryParams);
     }
 
-    // POST /cognito-user/resolve — batch resolve userIds to emails
+    // POST /cognito-user/resolve — batch resolve userIds to emails.
+    // Faculty needs this to render student emails in their course progress views.
     if (method === "POST" && event.resource?.includes("/resolve")) {
-      const authError = requireRole(caller, ["admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleBatchResolve(event.body);
     }

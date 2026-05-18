@@ -24,6 +24,9 @@ export * from './context-resolver';
 export * from './runtime-token';
 export * from './runtime-config';
 
+// Course-scoped authorization helpers (Canvas-like LMS feature)
+export * from './course-auth';
+
 // Re-export commonly used types for convenience
 export type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 export type { APIGatewayProxyHandler, APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";

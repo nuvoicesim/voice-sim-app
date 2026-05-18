@@ -33,7 +33,14 @@ import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
 const TABLE_NAME = process.env.TABLE_NAME;
 const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME;
 const UNITY_BUILD_PUBLIC_BASE_URL = (process.env.UNITY_BUILD_PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
-const s3 = new S3Client({ region: process.env.AWS_REGION || "us-east-1" });
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || "us-east-1",
+  // SDK v3 >= 3.729 injects a CRC32 checksum into PutObject by default. For
+  // browser presigned PUTs the checksum gets baked into the signed URL with a
+  // placeholder value, causing S3 to reject the upload with BadDigest.
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
+});
 const dynamo = createDynamoDbClient();
 
 type UnityBuildStatus = "uploaded" | "published" | "archived" | "failed";

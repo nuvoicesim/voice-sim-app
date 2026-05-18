@@ -24,7 +24,7 @@ const StepItem: React.FC<StepItemProps> = ({
   onClick
 }) => {
   let backgroundColor = 'transparent';
-  let color = '#000';
+  let color = '#4d4c48';
   let fontWeight = 400;
   let opacity = 1;
   let cursor = 'pointer';

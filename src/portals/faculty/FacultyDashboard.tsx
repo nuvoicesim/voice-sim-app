@@ -1,41 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  Title, Text, SimpleGrid, Paper, Stack, Box, Group,
-  ThemeIcon, Skeleton,
+  SimpleGrid, Paper, Stack, Box, Group, Skeleton,
 } from '@mantine/core';
 import {
-  IconSchool, IconActivity, IconCircleCheck, IconUsers, IconPercentage,
+  IconActivity, IconCircleCheck, IconUsers, IconPercentage,
 } from '@tabler/icons-react';
 import { analyticsApi } from '../../api/analyticsApi';
-
-function StatCard({
-  label, value, subText, icon: Icon, color, bgGradient, borderColor,
-}: {
-  label: string;
-  value: string | number;
-  subText?: string;
-  icon: typeof IconActivity;
-  color: string;
-  bgGradient: string;
-  borderColor: string;
-}) {
-  return (
-    <Paper radius="lg" p="md" style={{ background: bgGradient, border: `1px solid ${borderColor}` }}>
-      <Group justify="space-between" align="center">
-        <Box>
-          <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-            {label}
-          </Text>
-          <Title order={2} c={`${color}.7`} mt={2}>{value}</Title>
-          {subText && <Text size="xs" c="dimmed" mt={2}>{subText}</Text>}
-        </Box>
-        <ThemeIcon size={42} radius="xl" variant="light" color={color}>
-          <Icon size={22} />
-        </ThemeIcon>
-      </Group>
-    </Paper>
-  );
-}
+import { PageHeader, StatCard } from '../../components/design';
 
 function LoadingSkeleton() {
   return (
@@ -70,51 +41,16 @@ export default function FacultyDashboard() {
 
   return (
     <Stack gap="xl">
-      <Box>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'violet', to: 'grape' }}>
-            <IconSchool size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>Faculty Dashboard</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          Overview of cohort performance and activity
-        </Text>
-      </Box>
+      <PageHeader
+        title="Faculty Dashboard"
+        subtitle="Overview of cohort performance and activity"
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
-        <StatCard
-          label="Total Sessions"
-          value={data?.totalSessions ?? 0}
-          icon={IconActivity}
-          color="indigo"
-          bgGradient="linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%)"
-          borderColor="#dbe1ff"
-        />
-        <StatCard
-          label="Completed"
-          value={data?.completedSessions ?? 0}
-          icon={IconCircleCheck}
-          color="teal"
-          bgGradient="linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%)"
-          borderColor="#c6f6d5"
-        />
-        <StatCard
-          label="Unique Students"
-          value={data?.uniqueStudents ?? 0}
-          icon={IconUsers}
-          color="blue"
-          bgGradient="linear-gradient(135deg, #eef5ff 0%, #e0edff 100%)"
-          borderColor="#c9deff"
-        />
-        <StatCard
-          label="Completion Rate"
-          value={`${data?.completionRate ?? 0}%`}
-          icon={IconPercentage}
-          color="orange"
-          bgGradient="linear-gradient(135deg, #fff7f0 0%, #fff0e6 100%)"
-          borderColor="#ffdfc4"
-        />
+        <StatCard label="Total Sessions" value={data?.totalSessions ?? 0} icon={<IconActivity size={22} />} />
+        <StatCard label="Completed" value={data?.completedSessions ?? 0} icon={<IconCircleCheck size={22} />} />
+        <StatCard label="Unique Students" value={data?.uniqueStudents ?? 0} icon={<IconUsers size={22} />} accent="parchment" />
+        <StatCard label="Completion Rate" value={`${data?.completionRate ?? 0}%`} icon={<IconPercentage size={22} />} />
       </SimpleGrid>
     </Stack>
   );

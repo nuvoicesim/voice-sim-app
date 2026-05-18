@@ -17,13 +17,6 @@ const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
 };
 
-const ROLE_COLORS: Record<UserRole, string> = {
-  student: 'cyan',
-  faculty: 'violet',
-  simulation_designer: 'teal',
-  admin: 'pink',
-};
-
 function UserAvatar({ name }: { name: string }) {
   const initial = (name || 'U').charAt(0).toUpperCase();
   return (
@@ -32,14 +25,14 @@ function UserAvatar({ name }: { name: string }) {
         width: 32,
         height: 32,
         borderRadius: '50%',
-        background: 'rgba(255,255,255,0.2)',
+        background: 'var(--claude-border-cream)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
       }}
     >
-      <Text size="sm" fw={700} c="white">{initial}</Text>
+      <Text size="sm" fw={500} c="var(--claude-charcoal)">{initial}</Text>
     </Box>
   );
 }
@@ -63,8 +56,8 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
     <Box
       style={{
         height: 56,
-        background: 'linear-gradient(135deg, #4338ca 0%, #6d28d9 100%)',
-        color: 'white',
+        background: 'var(--claude-ivory)',
+        color: 'var(--claude-charcoal)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -74,25 +67,33 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
         left: 0,
         right: 0,
         zIndex: 1000,
+        borderBottom: '1px solid var(--claude-border-warm)',
       }}
     >
       {/* Left: Logo + admin switch */}
       <Group gap="md">
         <Group
-          gap={8}
+          gap={10}
           style={{ cursor: 'pointer' }}
           onClick={handleLogoClick}
         >
           <ThemeIcon
-            size={32} radius="xl"
+            size={32}
+            radius="md"
             variant="filled"
-            style={{ background: 'rgba(255,255,255,0.15)' }}
+            color="terracotta"
           >
-            <IconHeadphones size={18} color="white" />
+            <IconHeadphones size={18} color="var(--claude-ivory)" />
           </ThemeIcon>
           <Text
-            size="md" fw={800} c="white"
-            style={{ letterSpacing: 2, userSelect: 'none' }}
+            fw={500}
+            c="var(--claude-charcoal)"
+            style={{
+              fontFamily: 'Georgia, "Times New Roman", serif',
+              fontSize: '1.0625rem',
+              letterSpacing: 4,
+              userSelect: 'none',
+            }}
           >
             VOICE
           </Text>
@@ -100,26 +101,23 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
 
         {role === 'admin' && (
           <>
-            <Box style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.2)' }} />
+            <Box style={{ width: 1, height: 24, background: 'var(--claude-border-warm)' }} />
             <Group gap={4}>
-              <IconArrowsExchange size={14} style={{ color: 'rgba(255,255,255,0.5)' }} />
+              <IconArrowsExchange size={14} style={{ color: 'var(--claude-stone)' }} />
               <Button
-                size="compact-xs" variant="subtle" c="white" radius="xl"
-                style={{ opacity: 0.8 }}
+                size="compact-xs" variant="subtle" c="var(--claude-olive)" radius="xl"
                 onClick={() => navigate('/admin/dashboard')}
               >
                 Admin
               </Button>
               <Button
-                size="compact-xs" variant="subtle" c="white" radius="xl"
-                style={{ opacity: 0.8 }}
+                size="compact-xs" variant="subtle" c="var(--claude-olive)" radius="xl"
                 onClick={() => navigate('/faculty/dashboard')}
               >
                 Faculty
               </Button>
               <Button
-                size="compact-xs" variant="subtle" c="white" radius="xl"
-                style={{ opacity: 0.8 }}
+                size="compact-xs" variant="subtle" c="var(--claude-olive)" radius="xl"
                 onClick={() => navigate('/simulation-designer/patient-profiles')}
               >
                 Designer
@@ -132,8 +130,8 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
       {/* Right: Role badge + user + signout */}
       <Group gap="md">
         <Badge
-          color={ROLE_COLORS[role]}
-          variant="filled"
+          color="terracotta"
+          variant="light"
           size="sm"
           radius="xl"
           style={{ textTransform: 'capitalize' }}
@@ -143,23 +141,23 @@ function TopBar({ signOut, user, role = 'student' }: TopBarProps) {
 
         <Group gap={8}>
           <UserAvatar name={displayName} />
-          <Text size="sm" c="white" fw={500} visibleFrom="sm">
+          <Text size="sm" c="var(--claude-charcoal)" fw={400} visibleFrom="sm">
             {displayName}
           </Text>
         </Group>
 
         <Button
           variant="subtle"
-          c="white"
+          c="var(--claude-olive)"
           size="compact-sm"
           radius="xl"
           leftSection={<IconLogout size={15} />}
           onClick={signOut}
           style={{
-            border: '1px solid rgba(255,255,255,0.2)',
+            border: '1px solid var(--claude-border-warm)',
             transition: 'background 0.15s ease',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--claude-border-cream)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           Sign Out

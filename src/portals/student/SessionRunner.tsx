@@ -63,7 +63,7 @@ function LoadingSkeleton() {
       style={{
         minHeight: PAGE_HEIGHT,
         padding: `${PAGE_VERTICAL_PADDING} ${PAGE_HORIZONTAL_PADDING}`,
-        background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        background: 'var(--claude-parchment)',
         boxSizing: 'border-box',
       }}
     >
@@ -170,7 +170,8 @@ export default function SessionRunner() {
       } catch (error) {
         if (cancelled) return;
         console.error('Runtime token error:', error);
-        setRuntimeError('Unable to initialize the Unity runtime session.');
+        const detail = error instanceof Error && error.message ? error.message : String(error);
+        setRuntimeError(`Unable to initialize the Unity runtime session: ${detail}`);
       }
     };
 
@@ -302,7 +303,7 @@ export default function SessionRunner() {
       style={{
         minHeight: PAGE_HEIGHT,
         padding: `${PAGE_VERTICAL_PADDING} ${PAGE_HORIZONTAL_PADDING}`,
-        background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        background: 'var(--claude-parchment)',
         boxSizing: 'border-box',
       }}
     >
@@ -310,15 +311,15 @@ export default function SessionRunner() {
         <Group justify="space-between" align="flex-end" wrap="wrap" gap="lg">
           <Box>
             <Group gap="sm" mb={4}>
-              <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
-                <IconPlayerPlay size={18} color="white" />
+              <ThemeIcon size={38} radius="md" variant="filled" color="terracotta">
+                <IconPlayerPlay size={18} color="var(--claude-ivory)" />
               </ThemeIcon>
-              <Title order={2} fw={700}>Simulation Session</Title>
+              <Title order={2} fw={500} fz={36} lh={1.2}>Simulation Session</Title>
             </Group>
             <Group gap="sm" ml={52} wrap="wrap">
                 <Group gap={4}>
-                  <IconHash size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                  <Text size="xs" c="dimmed">Attempt {session.attemptNo}</Text>
+                  <IconHash size={12} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" c="var(--claude-olive)">Attempt {session.attemptNo}</Text>
                 </Group>
                 <Badge variant="light" color={modeConf.color} size="xs" radius="xl">
                   {modeConf.label}
@@ -330,7 +331,7 @@ export default function SessionRunner() {
                   radius="xl"
                   leftSection={
                     isActive
-                      ? <IconCircleFilled size={8} style={{ color: 'var(--mantine-color-green-6)' }} />
+                      ? <IconCircleFilled size={8} style={{ color: 'var(--claude-terracotta)' }} />
                       : undefined
                   }
                 >
@@ -343,11 +344,11 @@ export default function SessionRunner() {
             {isActive ? (
               <Button
                 variant="filled"
-                color="red"
+                color="terracotta"
                 size="md"
                 h={46}
                 px="xl"
-                radius="xl"
+                radius="lg"
                 leftSection={<IconPlayerStop size={16} />}
                 onClick={handleScoreAndComplete}
                 loading={scoring}
@@ -358,11 +359,11 @@ export default function SessionRunner() {
             ) : (
               <Button
                 variant="filled"
-                color="indigo"
+                color="terracotta"
                 size="md"
                 h={46}
                 px="xl"
-                radius="xl"
+                radius="lg"
                 leftSection={<IconChartBar size={16} />}
                 onClick={handleViewResults}
               >
@@ -374,7 +375,7 @@ export default function SessionRunner() {
 
         {runtimeError && isActive && (
           <Alert
-            color="red"
+            color="terracotta"
             icon={<IconAlertCircle size={16} />}
             radius="md"
             variant="light"
@@ -393,16 +394,16 @@ export default function SessionRunner() {
                 aspectRatio: UNITY_STAGE_ASPECT,
                 border: 'none',
                 display: 'block',
-                background: '#000',
-                borderRadius: 12,
-                boxShadow: '0 20px 48px rgba(15, 23, 42, 0.10)',
+                background: 'var(--claude-sand)',
+                borderRadius: 16,
+                boxShadow: 'var(--claude-shadow-whisper)',
               }}
               allow="microphone; autoplay"
               title="Unity Simulation"
             />
           ) : (
             <Alert
-              color="red"
+              color="terracotta"
               icon={<IconAlertCircle size={16} />}
               radius="md"
               variant="light"

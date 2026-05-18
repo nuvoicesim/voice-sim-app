@@ -20,6 +20,9 @@ export interface Assignment {
   targetId: string | null;
   status: "draft" | "published" | "archived";
   createdBy: string;
+  // Set by Course-LMS migration / when assignment is wrapped by a ModuleItem.
+  courseId?: string | null;
+  moduleItemId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

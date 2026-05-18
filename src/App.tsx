@@ -32,10 +32,26 @@ import SceneManagement from './portals/faculty/SceneManagement';
 import PatientProfilesPage from './portals/simulation-designer/PatientProfilesPage';
 import UnityBuildsPage from './portals/simulation-designer/UnityBuildsPage';
 
+// Faculty courses & surveys (Canvas-like LMS feature)
+import FacultyCourseListPage from './portals/faculty/courses/FacultyCourseListPage';
+import CreateCoursePage from './portals/faculty/courses/CreateCoursePage';
+import CourseEditorPage from './portals/faculty/courses/CourseEditorPage';
+import ModuleEditorPage from './portals/faculty/courses/ModuleEditorPage';
+import ModuleItemEditorPage from './portals/faculty/courses/ModuleItemEditorPage';
+import CourseReviewBoardPage from './portals/faculty/courses/CourseReviewBoardPage';
+import SurveyTemplateListPage from './portals/faculty/surveys/SurveyTemplateListPage';
+import SurveyTemplateEditorPage from './portals/faculty/surveys/SurveyTemplateEditorPage';
+
+// Student courses
+import StudentCourseListPage from './portals/student/courses/StudentCourseListPage';
+import StudentCoursePage from './portals/student/courses/StudentCoursePage';
+import ModuleItemPlayerPage from './portals/student/courses/ModuleItemPlayerPage';
+
 // Admin portal
 import AdminDashboard from './portals/admin/AdminDashboard';
 import UsersRolesPage from './portals/admin/UsersRolesPage';
 import GlobalAnalyticsPage from './portals/admin/GlobalAnalyticsPage';
+import EventLogsPage from './portals/admin/EventLogsPage';
 
 const PORTAL_HOME: Record<UserRole, string> = {
   student: '/student/dashboard',
@@ -76,7 +92,7 @@ function App() {
   }, [user?.username, dispatch, navigate, location.pathname]);
 
   return (
-    <Box style={{ background: '#f8f9fa', minHeight: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
+    <Box style={{ background: 'var(--claude-parchment)', minHeight: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
       <TopBar signOut={signOut} user={user} role={role} />
 
       <Box style={{ paddingTop: 56 }}>
@@ -89,6 +105,9 @@ function App() {
               <PortalLayout role="student">
                 <Routes>
                   <Route path="dashboard" element={<StudentDashboard />} />
+                  <Route path="courses" element={<StudentCourseListPage />} />
+                  <Route path="courses/:courseId" element={<StudentCoursePage />} />
+                  <Route path="courses/:courseId/items/:itemId" element={<ModuleItemPlayerPage />} />
                   <Route path="assignments" element={<AssignmentsPage />} />
                   <Route path="session/:sessionId" element={<SessionRunner />} />
                   <Route path="session/:sessionId/detail" element={<SessionDetailPage />} />
@@ -101,10 +120,18 @@ function App() {
 
           {/* Faculty Portal */}
           <Route path="/faculty/*" element={
-            <RoleGuard allowedRoles={['faculty', 'admin']}>
+            <RoleGuard allowedRoles={['faculty', 'simulation_designer', 'admin']}>
               <PortalLayout role="faculty">
                 <Routes>
                   <Route path="dashboard" element={<FacultyDashboard />} />
+                  <Route path="courses" element={<FacultyCourseListPage />} />
+                  <Route path="courses/new" element={<CreateCoursePage />} />
+                  <Route path="courses/:courseId" element={<CourseEditorPage />} />
+                  <Route path="courses/:courseId/reviews" element={<CourseReviewBoardPage />} />
+                  <Route path="courses/:courseId/modules/:moduleId" element={<ModuleEditorPage />} />
+                  <Route path="courses/:courseId/modules/:moduleId/items/:itemId" element={<ModuleItemEditorPage />} />
+                  <Route path="surveys" element={<SurveyTemplateListPage />} />
+                  <Route path="surveys/:templateId" element={<SurveyTemplateEditorPage />} />
                   <Route path="assignments/new" element={<CreateAssignment />} />
                   <Route path="assignments/:assignmentId/edit" element={<CreateAssignment />} />
                   <Route path="assignments" element={<AssignmentManagement />} />
@@ -136,8 +163,14 @@ function App() {
               <PortalLayout role="admin">
                 <Routes>
                   <Route path="dashboard" element={<AdminDashboard />} />
+                  <Route path="courses" element={<FacultyCourseListPage />} />
+                  <Route path="courses/:courseId" element={<CourseEditorPage />} />
+                  <Route path="courses/:courseId/modules/:moduleId" element={<ModuleEditorPage />} />
+                  <Route path="courses/:courseId/modules/:moduleId/items/:itemId" element={<ModuleItemEditorPage />} />
+                  <Route path="courses/:courseId/reviews" element={<CourseReviewBoardPage />} />
                   <Route path="users" element={<UsersRolesPage />} />
                   <Route path="analytics" element={<GlobalAnalyticsPage />} />
+                  <Route path="logs" element={<EventLogsPage />} />
                   <Route path="*" element={<Navigate to="dashboard" replace />} />
                 </Routes>
               </PortalLayout>

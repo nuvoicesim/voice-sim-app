@@ -28,39 +28,70 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+function extractMessageFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as Record<string, unknown>;
+  if (typeof obj.error === "string") return obj.error;
+  if (typeof obj.message === "string") return obj.message;
+  // Lambda function-error envelope: { errorMessage: "...", errorType: "..." }
+  if (typeof obj.errorMessage === "string") return obj.errorMessage;
+  return null;
+}
+
 async function parseErrorBody(body: unknown): Promise<string | null> {
-  if (!body || typeof body !== "object") {
-    return null;
-  }
+  if (body == null) return null;
 
-  const candidate = body as {
-    json?: () => Promise<unknown>;
-    text?: () => Promise<string>;
-  };
-
-  if (typeof candidate.json === "function") {
+  // Amplify v6 ApiError.response.body — a STRING containing the raw response body.
+  if (typeof body === "string") {
+    const trimmed = body.trim();
+    if (!trimmed) return null;
     try {
-      const payload = await candidate.json();
-      if (payload && typeof payload === "object") {
-        const message =
-          typeof (payload as { error?: unknown }).error === "string"
-            ? (payload as { error: string }).error
-            : typeof (payload as { message?: unknown }).message === "string"
-              ? (payload as { message: string }).message
-              : null;
-        if (message) return message;
-      }
+      const parsed = JSON.parse(trimmed);
+      const msg = extractMessageFromPayload(parsed);
+      if (msg) return msg;
     } catch {
-      // Ignore body parse failures and fall back to other error shapes.
+      // Not JSON — return raw text.
     }
+    return trimmed;
   }
 
-  if (typeof candidate.text === "function") {
-    try {
-      const text = await candidate.text();
-      return text.trim() || null;
-    } catch {
-      return null;
+  // Plain object (already parsed by some error path)
+  if (typeof body === "object") {
+    const direct = extractMessageFromPayload(body);
+    if (direct) return direct;
+
+    // Fallback: a Response-like object with .json() / .text() (older Amplify)
+    const candidate = body as {
+      json?: () => Promise<unknown>;
+      text?: () => Promise<string>;
+    };
+
+    if (typeof candidate.json === "function") {
+      try {
+        const payload = await candidate.json();
+        const msg = extractMessageFromPayload(payload);
+        if (msg) return msg;
+      } catch {
+        // fall through
+      }
+    }
+
+    if (typeof candidate.text === "function") {
+      try {
+        const text = await candidate.text();
+        const trimmed = text.trim();
+        if (!trimmed) return null;
+        try {
+          const parsed = JSON.parse(trimmed);
+          const msg = extractMessageFromPayload(parsed);
+          if (msg) return msg;
+        } catch {
+          // not JSON
+        }
+        return trimmed;
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -68,10 +99,6 @@ async function parseErrorBody(body: unknown): Promise<string | null> {
 }
 
 async function toApiError(error: unknown): Promise<Error> {
-  if (error instanceof Error && error.message && error.message !== "Unknown error") {
-    return error;
-  }
-
   const maybeError = error as {
     response?: {
       statusCode?: number;
@@ -80,11 +107,17 @@ async function toApiError(error: unknown): Promise<Error> {
     message?: unknown;
   };
 
+  // Always prefer the backend's response body message — Amplify's own
+  // ApiError.message is typically generic ("Request failed", "Network error").
   const responseMessage = await parseErrorBody(maybeError?.response?.body);
   if (responseMessage) {
     return new Error(responseMessage);
   }
 
+  // Then fall back to any pre-existing Error.message from upstream.
+  if (error instanceof Error && error.message && error.message !== "Unknown error") {
+    return error;
+  }
   if (typeof maybeError?.message === "string" && maybeError.message.trim()) {
     return new Error(maybeError.message);
   }

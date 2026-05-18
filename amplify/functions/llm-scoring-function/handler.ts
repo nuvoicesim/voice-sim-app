@@ -134,6 +134,12 @@ const CRITERIA_NAMES = [
 const ASSIGNMENT_TABLE_NAME = process.env.ASSIGNMENT_TABLE_NAME;
 const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
 const EVALUATION_TABLE_NAME = process.env.EVALUATION_TABLE_NAME;
+const SESSION_TABLE_NAME = process.env.SESSION_TABLE_NAME;
+// Course-LMS integration:
+const MODULE_ITEM_TABLE_NAME = process.env.MODULE_ITEM_TABLE_NAME;
+const STUDENT_ITEM_PROGRESS_TABLE_NAME = process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME;
+const REVIEWER_FEEDBACK_TABLE_NAME = process.env.REVIEWER_FEEDBACK_TABLE_NAME;
+const EVENT_LOG_TABLE_NAME = process.env.EVENT_LOG_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 function getHeaderValue(
@@ -648,6 +654,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         overallExplanation: report.overallExplanation,
         createdAt: generateTimestamp(),
       }, dynamo);
+
+      // Course-LMS integration: update best-attempt cache + mirror AI feedback into ReviewerFeedback.
+      await updateCourseBestAttempt(
+        request.context.sessionId,
+        request.context.assignmentId,
+        report.totalScore,
+        report.overallExplanation
+      );
     } catch (e) {
       console.warn("Failed to persist evaluation:", e);
     }
@@ -673,3 +687,147 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   return respond(HTTP_STATUS.OK, responseBody);
 };
+
+// ───────────── Course-LMS best-attempt + AI feedback mirror ─────────────
+
+async function updateCourseBestAttempt(
+  sessionId: string,
+  assignmentIdHint: string | undefined,
+  totalScore: number,
+  overallExplanation: string
+): Promise<void> {
+  if (
+    !ASSIGNMENT_TABLE_NAME ||
+    !MODULE_ITEM_TABLE_NAME ||
+    !STUDENT_ITEM_PROGRESS_TABLE_NAME ||
+    !REVIEWER_FEEDBACK_TABLE_NAME
+  ) {
+    return;
+  }
+  try {
+    const { GetCommand, ScanCommand } = await import("@aws-sdk/lib-dynamodb");
+
+    let assignmentId = assignmentIdHint;
+    let session: any = null;
+    if (!assignmentId && SESSION_TABLE_NAME) {
+      const sRes = await dynamo.send(
+        new GetCommand({ TableName: SESSION_TABLE_NAME, Key: { sessionId } })
+      );
+      session = sRes.Item;
+      assignmentId = session?.assignmentId;
+    } else if (SESSION_TABLE_NAME) {
+      const sRes = await dynamo.send(
+        new GetCommand({ TableName: SESSION_TABLE_NAME, Key: { sessionId } })
+      );
+      session = sRes.Item;
+    }
+    if (!assignmentId || !session?.studentUserId) return;
+    const studentUserId = session.studentUserId;
+
+    const aRes = await dynamo.send(
+      new GetCommand({ TableName: ASSIGNMENT_TABLE_NAME, Key: { assignmentId } })
+    );
+    const assignment = aRes.Item;
+    const moduleItemId = assignment?.moduleItemId;
+    const courseId = assignment?.courseId;
+    if (!moduleItemId || !courseId) return;
+
+    const miRes = await dynamo.send(
+      new GetCommand({ TableName: MODULE_ITEM_TABLE_NAME, Key: { moduleItemId } })
+    );
+    const moduleItem = miRes.Item;
+    if (!moduleItem) return;
+
+    // Read existing progress and decide whether new attempt is the new best.
+    const pRes = await dynamo.send(
+      new GetCommand({
+        TableName: STUDENT_ITEM_PROGRESS_TABLE_NAME,
+        Key: { moduleItemId, studentUserId },
+      })
+    );
+    const existing = pRes.Item;
+    const isBetter =
+      existing?.bestSessionScore == null || totalScore > existing.bestSessionScore;
+    if (!isBetter) {
+      return;
+    }
+    const now = generateTimestamp();
+    const next = {
+      moduleItemId,
+      studentUserId,
+      courseId,
+      moduleId: moduleItem.moduleId,
+      ...(existing || {}),
+      state: existing?.state || "completed",
+      bestSessionId: sessionId,
+      bestSessionScore: totalScore,
+      completedAt: existing?.completedAt || now,
+      startedAt: existing?.startedAt || session.startedAt || now,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    await putItem(STUDENT_ITEM_PROGRESS_TABLE_NAME, next, dynamo);
+
+    // Mirror AI feedback for that (moduleItemId, studentUserId): upsert single AI row.
+    const score1to7 = Math.max(1, Math.min(7, Math.round((totalScore / 24) * 7)));
+    const fbScan = await dynamo.send(
+      new ScanCommand({
+        TableName: REVIEWER_FEEDBACK_TABLE_NAME,
+        FilterExpression: "moduleItemId = :i AND studentUserId = :s AND #src = :src",
+        ExpressionAttributeNames: { "#src": "source" },
+        ExpressionAttributeValues: {
+          ":i": moduleItemId,
+          ":s": studentUserId,
+          ":src": "ai",
+        },
+      })
+    );
+    const existingAi = (fbScan.Items || [])[0];
+    if (existingAi?.locked) {
+      // Don't overwrite locked AI feedback (student has submitted ai_detection).
+      return;
+    }
+    const aiRow = {
+      feedbackId: existingAi?.feedbackId || cryptoRandomId(),
+      moduleItemId,
+      studentUserId,
+      source: "ai",
+      reviewerUserId: null,
+      displayLabel: existingAi?.displayLabel || "AI",
+      body: overallExplanation,
+      score: score1to7,
+      basedOnSessionId: sessionId,
+      revealed: existingAi?.revealed ?? false,
+      locked: false,
+      createdAt: existingAi?.createdAt || now,
+      updatedAt: now,
+    };
+    await putItem(REVIEWER_FEEDBACK_TABLE_NAME, aiRow, dynamo);
+
+    // Emit event.
+    if (EVENT_LOG_TABLE_NAME) {
+      const dateKey = now.slice(0, 10);
+      await putItem(
+        EVENT_LOG_TABLE_NAME,
+        {
+          eventId: cryptoRandomId(),
+          studentUserId,
+          studentDateKey: `${studentUserId}#${dateKey}`,
+          courseId,
+          moduleId: moduleItem.moduleId,
+          moduleItemId,
+          eventType: "best_attempt_updated",
+          payload: { sessionId, totalScore, score1to7 },
+          createdAt: now,
+        },
+        dynamo
+      );
+    }
+  } catch (e) {
+    console.warn("updateCourseBestAttempt failed", e);
+  }
+}
+
+function cryptoRandomId(): string {
+  return randomUUID();
+}

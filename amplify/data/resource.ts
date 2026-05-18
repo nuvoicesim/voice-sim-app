@@ -79,6 +79,9 @@ const schema = a.schema({
       targetId: a.string(),
       status: a.enum(["draft", "published", "archived"]),
       createdBy: a.string().required(),
+      // ── Course integration (added with Canvas-like LMS feature) ──
+      courseId: a.string(),
+      moduleItemId: a.string(),
       createdAt: a.string().required(),
       updatedAt: a.string().required(),
     })
@@ -180,8 +183,11 @@ const schema = a.schema({
     .model({
       surveyTemplateId: a.string().required(),
       name: a.string().required(),
+      description: a.string(),
       questions: a.json().required(),
       ownerRole: a.string(),
+      // Faculty owner of the template (faculty-private library); null = legacy/system template.
+      ownerFacultyId: a.string(),
       isActive: a.boolean().required(),
       createdAt: a.string().required(),
       updatedAt: a.string().required(),
@@ -201,6 +207,229 @@ const schema = a.schema({
       completionStatus: a.enum(["pending", "completed", "skipped"]),
     })
     .identifier(["assignmentId", "responseKey"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ─── Canvas-like LMS additions ───
+
+  Course: a
+    .model({
+      courseId: a.string().required(),
+      ownerFacultyId: a.string().required(),
+      title: a.string().required(),
+      description: a.string(),
+      status: a.enum(["draft", "published", "archived"]),
+      // {groups:[{key,label,weight?}], strategy:"uniform"|"weighted"} or empty
+      groupConfig: a.json(),
+      // When true and status="published", every authenticated student can see
+      // and access this course without an explicit CourseEnrollment row.
+      isDefault: a.boolean(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["courseId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  CourseInstructor: a
+    .model({
+      courseId: a.string().required(),
+      facultyUserId: a.string().required(),
+      // owner / co_teacher = the two professors actually teaching the course
+      // coordinator = a simulation_designer who set up the course but isn't a professor
+      role: a.enum(["owner", "co_teacher", "coordinator"]),
+      addedAt: a.string().required(),
+      addedBy: a.string().required(),
+    })
+    .identifier(["courseId", "facultyUserId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  CourseEnrollment: a
+    .model({
+      courseId: a.string().required(),
+      studentUserId: a.string().required(),
+      studentEmail: a.string(),
+      enrolledAt: a.string().required(),
+      enrolledBy: a.string(),
+      status: a.enum(["active", "removed"]),
+    })
+    .identifier(["courseId", "studentUserId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  Module: a
+    .model({
+      moduleId: a.string().required(),
+      courseId: a.string().required(),
+      title: a.string().required(),
+      description: a.string(),
+      position: a.integer().required(),
+      // {kind:"open"} | {kind:"after_module", moduleId}
+      gating: a.json(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["moduleId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  ModuleItem: a
+    .model({
+      moduleItemId: a.string().required(),
+      moduleId: a.string().required(),
+      courseId: a.string().required(),
+      itemType: a.enum([
+        "assignment",
+        "survey",
+        "external_link",
+        "debrief",
+        "instruction",
+        "randomizer",
+        "reveal_trigger",
+        "ai_detection",
+        "consent",
+      ]),
+      title: a.string().required(),
+      position: a.integer().required(),
+      // see plan §ModuleItem.gating
+      gating: a.json(),
+      // type-specific config (assignmentId / surveyTemplateId / url / markdown / etc)
+      payload: a.json().required(),
+      // {kind:"manual_check"|"auto_on_submit"|"auto_on_link_open"|"all_required_fields"}
+      completionRule: a.json(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["moduleItemId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  SurveyInstance: a
+    .model({
+      moduleItemId: a.string().required(),
+      studentUserId: a.string().required(),
+      surveyInstanceId: a.string().required(),
+      surveyTemplateId: a.string().required(),
+      courseId: a.string().required(),
+      // Frozen at first open: students see this snapshot, immune to template edits.
+      schemaSnapshot: a.json().required(),
+      // Free-form record per question id.
+      answers: a.json(),
+      status: a.enum(["in_progress", "submitted"]),
+      startedAt: a.string().required(),
+      submittedAt: a.string(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["moduleItemId", "studentUserId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  StudentItemProgress: a
+    .model({
+      moduleItemId: a.string().required(),
+      studentUserId: a.string().required(),
+      courseId: a.string().required(),
+      moduleId: a.string().required(),
+      state: a.enum(["locked", "unlocked", "in_progress", "completed"]),
+      unlockedAt: a.string(),
+      startedAt: a.string(),
+      completedAt: a.string(),
+      manualCheckedAt: a.string(),
+      // For itemType=assignment: best-attempt cache.
+      bestSessionId: a.string(),
+      bestSessionScore: a.float(),
+      // For itemType=ai_detection: list of assignmentItemIds with sub-question unlocked.
+      unlockedSubKeys: a.json(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["moduleItemId", "studentUserId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  StudentGroupAssignment: a
+    .model({
+      courseId: a.string().required(),
+      studentUserId: a.string().required(),
+      // Usually courseId; the scope for which this group choice applies.
+      scopeKey: a.string().required(),
+      groupKey: a.string().required(),
+      assignedByItemId: a.string(),
+      assignedAt: a.string().required(),
+    })
+    .identifier(["courseId", "studentUserId", "scopeKey"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  ReviewerAssignment: a
+    .model({
+      moduleItemId: a.string().required(),
+      reviewerUserId: a.string().required(),
+      studentUserId: a.string().required(),
+      displayLabel: a.string(),
+      createdAt: a.string().required(),
+    })
+    .identifier(["moduleItemId", "reviewerUserId", "studentUserId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  ReviewerFeedback: a
+    .model({
+      feedbackId: a.string().required(),
+      moduleItemId: a.string().required(),
+      studentUserId: a.string().required(),
+      source: a.enum(["ai", "reviewer"]),
+      // null when source = "ai".
+      reviewerUserId: a.string(),
+      // "Source 1/2/3" used in blinded mode.
+      displayLabel: a.string(),
+      body: a.string().required(),
+      // 1-7 (rounded from AI 8-24 totalScore for AI rows).
+      score: a.integer(),
+      basedOnSessionId: a.string(),
+      // false until reveal_trigger fires; ai_detection keeps locked but unrevealed.
+      revealed: a.boolean().required(),
+      // Frozen by ai_detection submission so reviewer cannot edit afterward.
+      locked: a.boolean().required(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["feedbackId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  EventLog: a
+    .model({
+      eventId: a.string().required(),
+      studentUserId: a.string().required(),
+      // YYYY-MM-DD prefix `${studentUserId}#${date}` enables future GSI without writer change.
+      studentDateKey: a.string().required(),
+      courseId: a.string(),
+      moduleId: a.string(),
+      moduleItemId: a.string(),
+      eventType: a.string().required(),
+      payload: a.json(),
+      createdAt: a.string().required(),
+    })
+    .identifier(["eventId"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  MigrationLog: a
+    .model({
+      migrationName: a.string().required(),
+      version: a.string().required(),
+      completedAt: a.string().required(),
+      meta: a.json(),
+    })
+    .identifier(["migrationName"])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Permanent IRB-style record of a student's consent decision for a consent
+  // ModuleItem. One row per (consent item, student); upsert on change-of-mind.
+  // bodySnapshot captures the markdown text that was actually shown at decision
+  // time so we can prove what the student saw even if faculty edits the consent later.
+  ConsentDecision: a
+    .model({
+      consentItemId: a.string().required(),
+      studentUserId: a.string().required(),
+      courseId: a.string().required(),
+      decision: a.enum(["agreed", "declined"]),
+      consentVersion: a.string(),
+      bodySnapshot: a.string(),
+      decidedAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["consentItemId", "studentUserId"])
     .authorization((allow) => [allow.authenticated()]),
 });
 

@@ -4,7 +4,6 @@ import {
   Badge,
   Box,
   Button,
-  Center,
   Group,
   Modal,
   NumberInput,
@@ -17,7 +16,6 @@ import {
   TextInput,
   Textarea,
   ThemeIcon,
-  Title,
 } from '@mantine/core';
 import {
   IconArchive,
@@ -27,9 +25,9 @@ import {
   IconInbox,
   IconMessageChatbot,
   IconPlus,
-  IconUserStar,
 } from '@tabler/icons-react';
 import { patientProfileApi, type PatientProfilePayload } from '../../api/patientProfileApi';
+import { PageHeader, EmptyState } from '../../components/design';
 
 interface PromptConfig {
   systemPrompt: string;
@@ -111,9 +109,9 @@ const EMPTY_FORM: PatientProfileFormState = {
 };
 
 const STATUS_COLORS: Record<PatientProfile['status'], string> = {
-  draft: 'gray',
-  published: 'teal',
-  archived: 'red',
+  draft: 'parchment',
+  published: 'terracotta',
+  archived: 'parchment',
 };
 
 function toForm(profile: PatientProfile) {
@@ -190,24 +188,6 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyState() {
-  return (
-    <Center style={{ minHeight: 320 }}>
-      <Stack align="center" gap="lg">
-        <ThemeIcon size={88} radius="xl" variant="light" color="teal">
-          <IconInbox size={40} />
-        </ThemeIcon>
-        <Box ta="center">
-          <Title order={4} mb={4}>No patient profiles yet</Title>
-          <Text c="dimmed" size="sm" maw={320}>
-            Create reusable patient profiles so assignments can pick a patient without duplicating prompts or voice settings.
-          </Text>
-        </Box>
-      </Stack>
-    </Center>
-  );
-}
-
 function ProfileCard({
   profile,
   onEdit,
@@ -221,69 +201,69 @@ function ProfileCard({
     <Paper
       radius="lg"
       p="lg"
-      withBorder
-      style={{ border: '1px solid #edf0f5', transition: 'box-shadow 0.2s ease, transform 0.2s ease' }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
+      style={{
+        background: 'var(--claude-ivory)',
+        border: '1px solid var(--claude-border-cream)',
+        boxShadow: 'var(--claude-shadow-whisper)',
+        transition: 'box-shadow 0.2s ease',
       }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '';
-        e.currentTarget.style.transform = '';
-      }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta), var(--claude-shadow-whisper)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
     >
       <Group justify="space-between" align="flex-start" mb="md">
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group gap="xs" mb={4}>
-            <Text fw={700} size="md" lineClamp={1}>{profile.displayName}</Text>
+            <Text fw={500} size="md" lineClamp={1} c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+              {profile.displayName}
+            </Text>
             <Badge variant="light" color={STATUS_COLORS[profile.status]} radius="xl" size="xs">
               {profile.status}
             </Badge>
           </Group>
-          <Badge variant="outline" radius="xl" size="xs" color="gray">
+          <Badge variant="outline" radius="xl" size="xs" color="parchment">
             {profile.profileKey}
           </Badge>
         </Box>
         <Group gap={4}>
-          <ActionIcon variant="light" color="blue" radius="xl" size="sm" onClick={() => onEdit(profile)}>
+          <ActionIcon variant="light" color="terracotta" radius="md" size="sm" onClick={() => onEdit(profile)}>
             <IconEdit size={14} />
           </ActionIcon>
-          <ActionIcon variant="light" color="red" radius="xl" size="sm" onClick={() => onArchive(profile)}>
+          <ActionIcon variant="light" color="parchment" radius="md" size="sm" onClick={() => onArchive(profile)}>
             <IconArchive size={14} />
           </ActionIcon>
         </Group>
       </Group>
 
       <Stack gap="sm">
-        <Paper radius="md" p="sm" style={{ background: '#f8f9fb' }}>
+        <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
           <Group gap="xs" mb={6}>
-            <ThemeIcon size={24} radius="xl" variant="light" color="indigo">
+            <ThemeIcon size={24} radius="md" variant="light" color="terracotta">
               <IconMessageChatbot size={14} />
             </ThemeIcon>
-            <Text fw={600} size="sm">Dialogue Prompt</Text>
+            <Text fw={500} size="sm" c="var(--claude-near-black)">Dialogue Prompt</Text>
           </Group>
-          <Text size="xs" c="dimmed" lineClamp={3}>{profile.dialogueConfig.systemPrompt}</Text>
+          <Text size="xs" c="var(--claude-olive)" lineClamp={3}>{profile.dialogueConfig.systemPrompt}</Text>
         </Paper>
 
-        <Paper radius="md" p="sm" style={{ background: '#f8f9fb' }}>
+        <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
           <Group gap="xs" mb={6}>
-            <ThemeIcon size={24} radius="xl" variant="light" color="orange">
+            <ThemeIcon size={24} radius="md" variant="light" color="terracotta">
               <IconBrain size={14} />
             </ThemeIcon>
-            <Text fw={600} size="sm">Scoring Prompt</Text>
+            <Text fw={500} size="sm" c="var(--claude-near-black)">Scoring Prompt</Text>
           </Group>
-          <Text size="xs" c="dimmed" lineClamp={3}>{profile.scoringConfig.systemPrompt}</Text>
+          <Text size="xs" c="var(--claude-olive)" lineClamp={3}>{profile.scoringConfig.systemPrompt}</Text>
         </Paper>
 
-        <Paper radius="md" p="sm" style={{ background: '#f8f9fb' }}>
+        <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
           <Group gap="xs" mb={6}>
-            <ThemeIcon size={24} radius="xl" variant="light" color="teal">
+            <ThemeIcon size={24} radius="md" variant="light" color="terracotta">
               <IconHeadphones size={14} />
             </ThemeIcon>
-            <Text fw={600} size="sm">Voice Settings</Text>
+            <Text fw={500} size="sm" c="var(--claude-near-black)">Voice Settings</Text>
           </Group>
-          <Text size="xs" c="dimmed">Voice ID: {profile.ttsConfig.voiceId}</Text>
-          <Text size="xs" c="dimmed">Model: {profile.ttsConfig.modelId}</Text>
+          <Text size="xs" c="var(--claude-olive)">Voice ID: {profile.ttsConfig.voiceId}</Text>
+          <Text size="xs" c="var(--claude-olive)">Model: {profile.ttsConfig.modelId}</Text>
         </Paper>
       </Stack>
     </Paper>
@@ -361,47 +341,44 @@ export default function PatientProfilesPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" align="flex-start">
-        <Box>
-          <Group gap="sm" mb={4}>
-            <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'teal', to: 'cyan' }}>
-              <IconUserStar size={20} color="white" />
-            </ThemeIcon>
-            <Title order={2} fw={700}>Patient Profiles</Title>
-          </Group>
-          <Text c="dimmed" size="sm" ml={52}>
-            Reusable patient identity, prompts, and ElevenLabs voice settings for assignment launch.
-          </Text>
-        </Box>
-
-        <Button
-          radius="xl"
-          leftSection={<IconPlus size={16} />}
-          variant="gradient"
-          gradient={{ from: 'teal', to: 'cyan' }}
-          onClick={openCreate}
-        >
-          New Patient Profile
-        </Button>
-      </Group>
+      <PageHeader
+        title="Patient Profiles"
+        subtitle="Reusable patient identity, prompts, and ElevenLabs voice settings for assignment launch."
+        actions={
+          <Button
+            radius="lg"
+            color="terracotta"
+            leftSection={<IconPlus size={16} />}
+            onClick={openCreate}
+          >
+            New Patient Profile
+          </Button>
+        }
+      />
 
       {error && (
-        <Paper radius="md" p="sm" withBorder style={{ borderColor: '#fecaca', background: '#fff1f2' }}>
-          <Text size="sm" c="red.7">{error}</Text>
+        <Paper radius="md" p="sm" style={{ borderColor: 'var(--claude-terracotta)', background: 'var(--claude-ivory)', border: '1px solid var(--claude-terracotta)' }}>
+          <Text size="sm" c="var(--claude-terracotta)">{error}</Text>
         </Paper>
       )}
 
       {loading ? (
         <LoadingSkeleton />
       ) : profiles.length === 0 ? (
-        <EmptyState />
+        <EmptyState
+          icon={<IconInbox size={28} />}
+          title="No patient profiles yet"
+          description="Create reusable patient profiles so assignments can pick a patient without duplicating prompts or voice settings."
+          ctaLabel="New Patient Profile"
+          onCta={openCreate}
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, md: 2, xl: 3 }} spacing="lg">
           {profiles.map((profile) => (
             <Box key={profile.patientProfileId} style={{ position: 'relative' }}>
               <ProfileCard profile={profile} onEdit={openEdit} onArchive={handleArchive} />
               {archivingProfileId === profile.patientProfileId && (
-                <Badge color="red" variant="filled" style={{ position: 'absolute', top: 14, right: 52 }}>
+                <Badge color="terracotta" variant="filled" style={{ position: 'absolute', top: 14, right: 52 }}>
                   Archiving...
                 </Badge>
               )}
@@ -416,6 +393,7 @@ export default function PatientProfilesPage() {
         title={editingProfile ? 'Edit Patient Profile' : 'New Patient Profile'}
         size="xl"
         centered
+        radius="lg"
       >
         <Stack gap="lg">
           <Group grow>
@@ -452,10 +430,10 @@ export default function PatientProfilesPage() {
 
           <Paper radius="md" p="md" withBorder>
             <Group gap="xs" mb="md">
-              <ThemeIcon size={26} radius="xl" variant="light" color="indigo">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
                 <IconMessageChatbot size={14} />
               </ThemeIcon>
-              <Text fw={600} size="sm">Dialogue Config</Text>
+              <Text fw={500} size="sm" c="var(--claude-near-black)">Dialogue Config</Text>
             </Group>
             <Stack gap="md">
               <Textarea
@@ -508,10 +486,10 @@ export default function PatientProfilesPage() {
 
           <Paper radius="md" p="md" withBorder>
             <Group gap="xs" mb="md">
-              <ThemeIcon size={26} radius="xl" variant="light" color="orange">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
                 <IconBrain size={14} />
               </ThemeIcon>
-              <Text fw={600} size="sm">Scoring Config</Text>
+              <Text fw={500} size="sm" c="var(--claude-near-black)">Scoring Config</Text>
             </Group>
             <Stack gap="md">
               <Textarea
@@ -564,10 +542,10 @@ export default function PatientProfilesPage() {
 
           <Paper radius="md" p="md" withBorder>
             <Group gap="xs" mb="md">
-              <ThemeIcon size={26} radius="xl" variant="light" color="teal">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
                 <IconHeadphones size={14} />
               </ThemeIcon>
-              <Text fw={600} size="sm">ElevenLabs Voice Settings</Text>
+              <Text fw={500} size="sm" c="var(--claude-near-black)">ElevenLabs Voice Settings</Text>
             </Group>
             <Stack gap="md">
               <Group grow>
@@ -652,12 +630,11 @@ export default function PatientProfilesPage() {
           </Paper>
 
           <Group justify="flex-end">
-            <Button variant="subtle" color="gray" onClick={() => setModalOpen(false)}>
+            <Button variant="subtle" color="parchment" onClick={() => setModalOpen(false)}>
               Cancel
             </Button>
             <Button
-              variant="gradient"
-              gradient={{ from: 'teal', to: 'cyan' }}
+              color="terracotta"
               onClick={handleSave}
               loading={saving}
             >

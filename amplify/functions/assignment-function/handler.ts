@@ -33,7 +33,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // PUT /assignments/{assignmentId}/status
     if (method === "PUT" && pathParams?.assignmentId && event.resource?.includes("/status")) {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleUpdateStatus(pathParams.assignmentId, event.body);
     }
@@ -41,7 +41,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // PUT /assignments/{assignmentId}
     if (method === "PUT" && pathParams?.assignmentId) {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleUpdateAssignment(pathParams.assignmentId, event.body);
     }
@@ -49,7 +49,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // GET /assignments/{assignmentId}
     if (method === "GET" && pathParams?.assignmentId) {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["student", "faculty", "admin"]);
+      const authError = requireRole(caller, ["student", "faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleGetAssignment(pathParams.assignmentId, caller!);
     }
@@ -57,7 +57,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // GET /assignments
     if (method === "GET") {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["student", "faculty", "admin"]);
+      const authError = requireRole(caller, ["student", "faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       const params = getQueryParams(event.queryStringParameters);
       return await handleListAssignments(caller!, params);
@@ -66,7 +66,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // POST /assignments
     if (method === "POST") {
       const caller = await extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleCreateAssignment(caller!.userId, event.body);
     }
@@ -158,22 +158,31 @@ async function handleListAssignments(
   params: Record<string, string>
 ) {
   const statusFilter = params.status;
-  let filterExpression: string | undefined;
-  let expressionValues: Record<string, string> | undefined;
+  const courseFilter = params.courseId;
+  const filterParts: string[] = [];
+  const expressionValues: Record<string, string> = {};
+  const expressionNames: Record<string, string> = {};
 
   if (statusFilter) {
-    filterExpression = "#s = :status";
-    expressionValues = { ":status": statusFilter };
+    filterParts.push("#s = :status");
+    expressionNames["#s"] = "status";
+    expressionValues[":status"] = statusFilter;
+  }
+  if (courseFilter) {
+    filterParts.push("courseId = :c");
+    expressionValues[":c"] = courseFilter;
   }
 
-  const result = await dynamo.send(new ScanCommand({
-    TableName: TABLE_NAME,
-    ...(filterExpression && {
-      FilterExpression: filterExpression,
-      ExpressionAttributeValues: expressionValues,
-      ExpressionAttributeNames: { "#s": "status" },
-    }),
-  }));
+  const result = await dynamo.send(
+    new ScanCommand({
+      TableName: TABLE_NAME,
+      ...(filterParts.length > 0 && {
+        FilterExpression: filterParts.join(" AND "),
+        ExpressionAttributeValues: expressionValues,
+        ...(Object.keys(expressionNames).length > 0 && { ExpressionAttributeNames: expressionNames }),
+      }),
+    })
+  );
 
   let assignments = result.Items || [];
 

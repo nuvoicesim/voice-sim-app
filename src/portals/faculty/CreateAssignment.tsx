@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import {
-  Title, Text, Stack, TextInput, Textarea, Select, NumberInput,
-  Button, Paper, Group, Badge, Box, ThemeIcon, Alert,
+  Text, Stack, TextInput, Textarea, Select, NumberInput,
+  Button, Group, Badge, ThemeIcon, Alert,
 } from '@mantine/core';
 import {
-  IconFilePlus, IconArrowLeft, IconDeviceGamepad2,
+  IconArrowLeft, IconDeviceGamepad2,
   IconBook2, IconClipboardCheck, IconCalendar, IconAlertCircle,
 } from '@tabler/icons-react';
 import { createAssignment } from '../../slices/assignmentSlice';
@@ -14,6 +14,7 @@ import { sceneCatalogApi } from '../../api/sceneCatalogApi';
 import { patientProfileApi } from '../../api/patientProfileApi';
 import { assignmentApi } from '../../api/assignmentApi';
 import type { AppDispatch } from '../../store';
+import { PageHeader, SectionCard } from '../../components/design';
 
 interface SceneOption {
   sceneId: string;
@@ -177,41 +178,33 @@ export default function CreateAssignment() {
 
   return (
     <Stack gap="xl" style={{ maxWidth: 720 }}>
-      {/* ── Header ── */}
-      <Box>
-        <Button
-          variant="subtle" color="gray" size="xs" radius="xl" px="sm" mb="xs"
-          leftSection={<IconArrowLeft size={14} />}
-          onClick={() => navigate(assignmentsPath)}
-        >
-          Back to Assignments
-        </Button>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
-            <IconFilePlus size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>{pageTitle}</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          {pageDescription}
-        </Text>
-      </Box>
+      <Button
+        variant="subtle" color="parchment" size="xs" radius="xl" px="sm"
+        leftSection={<IconArrowLeft size={14} />}
+        onClick={() => navigate(assignmentsPath)}
+        style={{ alignSelf: 'flex-start' }}
+      >
+        Back to Assignments
+      </Button>
+      <PageHeader title={pageTitle} subtitle={pageDescription} />
 
       {assignmentError && (
-        <Alert color="red" radius="md" icon={<IconAlertCircle size={16} />}>
+        <Alert color="terracotta" radius="md" icon={<IconAlertCircle size={16} />}>
           {assignmentError}
         </Alert>
       )}
 
       {/* ── Scene selection ── */}
-      <Paper radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
-        <Group gap="xs" mb="md">
-          <ThemeIcon size={26} radius="xl" variant="light" color="teal">
-            <IconDeviceGamepad2 size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Scene Configuration</Text>
-        </Group>
-
+      <SectionCard
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+              <IconDeviceGamepad2 size={14} />
+            </ThemeIcon>
+            <Text fw={500} size="md" c="var(--claude-near-black)">Scene Configuration</Text>
+          </Group>
+        }
+      >
         <Stack gap="md">
           <Select
             label="Simulation Scene"
@@ -245,38 +238,40 @@ export default function CreateAssignment() {
             radius="md"
           />
           {selectedScene && (
-            <Paper radius="md" p="sm" style={{ background: '#f0fff4', border: '1px solid #c6f6d5' }}>
+            <Stack gap={6} p="sm" style={{ background: 'var(--claude-parchment)', border: '1px solid var(--claude-border-warm)', borderRadius: 8 }}>
               <Group gap="xs">
-                <Text size="xs" c="dimmed">Linked Unity Game:</Text>
+                <Text size="xs" c="var(--claude-stone)">Linked Unity Game:</Text>
                 {selectedScene.unityBuildId ? (
-                  <Badge variant="dot" color="teal" size="sm">Managed build linked</Badge>
+                  <Badge variant="dot" color="terracotta" size="sm">Managed build linked</Badge>
                 ) : (
-                  <Text size="xs" c="red">No published Unity build linked</Text>
+                  <Text size="xs" c="var(--claude-terracotta)">No published Unity build linked</Text>
                 )}
               </Group>
-            </Paper>
+            </Stack>
           )}
           {selectedProfile && (
-            <Paper radius="md" p="sm" style={{ background: '#f0fdfa', border: '1px solid #99f6e4' }}>
+            <Stack gap={6} p="sm" style={{ background: 'var(--claude-parchment)', border: '1px solid var(--claude-border-warm)', borderRadius: 8 }}>
               <Group gap="xs">
-                <Text size="xs" c="dimmed">Selected Patient:</Text>
-                <Badge variant="dot" color="teal" size="sm">{selectedProfile.displayName}</Badge>
-                <Badge variant="light" color="gray" size="sm">{selectedProfile.profileKey}</Badge>
+                <Text size="xs" c="var(--claude-stone)">Selected Patient:</Text>
+                <Badge variant="dot" color="terracotta" size="sm">{selectedProfile.displayName}</Badge>
+                <Badge variant="light" color="parchment" size="sm">{selectedProfile.profileKey}</Badge>
               </Group>
-            </Paper>
+            </Stack>
           )}
         </Stack>
-      </Paper>
+      </SectionCard>
 
       {/* ── Assignment details ── */}
-      <Paper radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
-        <Group gap="xs" mb="md">
-          <ThemeIcon size={26} radius="xl" variant="light" color="indigo">
-            <IconBook2 size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Assignment Details</Text>
-        </Group>
-
+      <SectionCard
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+              <IconBook2 size={14} />
+            </ThemeIcon>
+            <Text fw={500} size="md" c="var(--claude-near-black)">Assignment Details</Text>
+          </Group>
+        }
+      >
         <Stack gap="md">
           <TextInput
             label="Title"
@@ -313,22 +308,24 @@ export default function CreateAssignment() {
             disabled={assignmentLoading}
             leftSection={
               form.mode === 'assessment'
-                ? <IconClipboardCheck size={16} style={{ color: 'var(--mantine-color-orange-5)' }} />
-                : <IconBook2 size={16} style={{ color: 'var(--mantine-color-blue-5)' }} />
+                ? <IconClipboardCheck size={16} style={{ color: 'var(--claude-terracotta)' }} />
+                : <IconBook2 size={16} style={{ color: 'var(--claude-stone)' }} />
             }
           />
         </Stack>
-      </Paper>
+      </SectionCard>
 
       {/* ── Policies ── */}
-      <Paper radius="lg" p="lg" withBorder style={{ border: '1px solid #edf0f5' }}>
-        <Group gap="xs" mb="md">
-          <ThemeIcon size={26} radius="xl" variant="light" color="orange">
-            <IconCalendar size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Policies & Scheduling</Text>
-        </Group>
-
+      <SectionCard
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+              <IconCalendar size={14} />
+            </ThemeIcon>
+            <Text fw={500} size="md" c="var(--claude-near-black)">Policies & Scheduling</Text>
+          </Group>
+        }
+      >
         <Stack gap="md">
           <NumberInput
             label="Max Attempts"
@@ -348,20 +345,19 @@ export default function CreateAssignment() {
             disabled={assignmentLoading}
           />
         </Stack>
-      </Paper>
+      </SectionCard>
 
       {/* ── Actions ── */}
       <Group justify="flex-end">
         <Button
-          variant="subtle" color="gray" radius="md"
+          variant="subtle" color="parchment" radius="md"
           onClick={() => navigate(assignmentsPath)}
         >
           Cancel
         </Button>
         <Button
           radius="md"
-          variant="gradient"
-          gradient={{ from: 'indigo', to: 'violet' }}
+          color="terracotta"
           onClick={handleSubmit}
           loading={submitting}
           disabled={assignmentLoading || Boolean(assignmentError)}
