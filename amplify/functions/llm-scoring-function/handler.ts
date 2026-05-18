@@ -19,6 +19,8 @@ import {
   generateTimestamp,
   type OpenAIUsage,
 } from "../shared";
+import { handlePhase1Rubric } from "./phase1-rubric";
+import { handlePhase2Evidence } from "./phase2-evidence";
 
 interface ConversationTurn {
   patient: string;
@@ -140,6 +142,8 @@ const MODULE_ITEM_TABLE_NAME = process.env.MODULE_ITEM_TABLE_NAME;
 const STUDENT_ITEM_PROGRESS_TABLE_NAME = process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME;
 const REVIEWER_FEEDBACK_TABLE_NAME = process.env.REVIEWER_FEEDBACK_TABLE_NAME;
 const EVENT_LOG_TABLE_NAME = process.env.EVENT_LOG_TABLE_NAME;
+// VOICE study evidence persistence (May 18 faculty decision):
+const SESSION_EVIDENCE_TABLE_NAME = process.env.SESSION_EVIDENCE_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 function getHeaderValue(
@@ -460,8 +464,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  let runtimeClaims;
   try {
-    const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+    runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
     payload = applyRuntimeClaimsToBody((payload as Record<string, unknown>) ?? {}, runtimeClaims);
   } catch (error) {
     if (error instanceof RuntimeTokenError) {
@@ -473,6 +478,38 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
     throw error;
   }
+
+  // ─── VOICE study dispatch (May 18 faculty decision) ───
+  // Route Phase 1 rubric and Phase 2 evidence requests to their own branches
+  // before the legacy narrative scoring validator runs. Legacy requests (no
+  // matching taskContext discriminators) fall through to the original path
+  // unchanged. See phase1-rubric.ts and phase2-evidence.ts.
+  const taskContextForRouting = (payload as Record<string, unknown> | undefined)?.taskContext as
+    | { phaseId?: string; scoringMode?: string }
+    | undefined;
+  const phaseId = typeof taskContextForRouting?.phaseId === "string" ? taskContextForRouting.phaseId.trim().toLowerCase() : "";
+  const scoringMode = typeof taskContextForRouting?.scoringMode === "string" ? taskContextForRouting.scoringMode.trim().toLowerCase() : "";
+
+  if (phaseId === "phase1" && scoringMode === "phase1-rubric") {
+    return handlePhase1Rubric(payload, {
+      dynamo,
+      openAiApiKey: OPENAI_API_KEY,
+      requestId,
+      corsHeaders,
+      runtimeClaims,
+      sessionEvidenceTableName: SESSION_EVIDENCE_TABLE_NAME,
+    });
+  }
+  if (phaseId === "phase2") {
+    return handlePhase2Evidence(payload, {
+      dynamo,
+      requestId,
+      corsHeaders,
+      runtimeClaims,
+      sessionEvidenceTableName: SESSION_EVIDENCE_TABLE_NAME,
+    });
+  }
+  // ─── End VOICE study dispatch — fall through to legacy narrative path ───
 
   const validation = validateScoringRequest(payload);
   if (!validation.request) {

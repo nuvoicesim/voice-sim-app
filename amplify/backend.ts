@@ -233,6 +233,7 @@ const reviewerFeedbackTable = backend.data.resources.tables["ReviewerFeedback"];
 const eventLogTable = backend.data.resources.tables["EventLog"];
 const migrationLogTable = backend.data.resources.tables["MigrationLog"];
 const consentDecisionTable = backend.data.resources.tables["ConsentDecision"];
+const sessionEvidenceTable = backend.data.resources.tables["SessionEvidence"];
 
 // Helper: attach common course-auth env vars to a function so requireCourseInstructor/etc. work.
 function attachCourseAuthEnv(fn: any) {
@@ -444,6 +445,10 @@ for (const fn of runtimeFunctions) {
 // Scoring also needs write to evaluation table
 evaluationTable.grantReadWriteData(backend.llmScoringFunction.resources.lambda);
 backend.llmScoringFunction.addEnvironment("EVALUATION_TABLE_NAME", evaluationTable.tableName);
+
+// VOICE study evidence persistence for Phase 1 rubric + Phase 2 training submissions.
+sessionEvidenceTable.grantReadWriteData(backend.llmScoringFunction.resources.lambda);
+backend.llmScoringFunction.addEnvironment("SESSION_EVIDENCE_TABLE_NAME", sessionEvidenceTable.tableName);
 
 // Grant Cognito permissions to cognito-user-function and add environment variable for USER_POOL_ID
 const userPool = backend.auth.resources.userPool;
