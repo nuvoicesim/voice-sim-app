@@ -32,6 +32,9 @@ const UNITY_BUILD_TABLE = process.env.UNITY_BUILD_TABLE_NAME;
 const ENROLLMENT_TABLE = process.env.ENROLLMENT_TABLE_NAME;
 const TURN_TABLE = process.env.TURN_TABLE_NAME;
 const EVALUATION_TABLE = process.env.EVALUATION_TABLE_NAME;
+const SESSION_TASK_PROGRESS_TABLE = process.env.SESSION_TASK_PROGRESS_TABLE_NAME;
+const SESSION_TASK_PROGRESS_BY_SESSION_INDEX =
+  process.env.SESSION_TASK_PROGRESS_BY_SESSION_INDEX_NAME ?? "bySessionProgressKey";
 // Course-LMS integration:
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME;
 const STUDENT_ITEM_PROGRESS_TABLE = process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME;
@@ -87,6 +90,23 @@ interface SessionTurnView extends SessionTurnRecord {
   patientSpeechDurationMs?: number;
 }
 
+interface SessionTaskProgressRecord {
+  progressId: string;
+  sessionId: string;
+  progressKey: string;
+  assignmentId: string;
+  studentUserId: string;
+  phaseId: string;
+  sectionId?: string;
+  taskId?: string;
+  taskType?: string;
+  state: "completed";
+  completedAt: string;
+  latestEvidenceId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface SessionStartOutcome {
   session: SessionRecord;
   resumed: boolean;
@@ -97,6 +117,7 @@ type TurnTimingField =
   | "userSpeechEndAt"
   | "patientSpeechStartAt"
   | "patientSpeechEndAt";
+type RuntimeClaims = ReturnType<typeof requireRuntimeTokenClaims>;
 
 async function getAssignmentStatus(assignmentId: string): Promise<string | null> {
   if (!ASSIGNMENT_TABLE) {
@@ -180,8 +201,55 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleIssueRuntimeToken(pathParams.sessionId, caller!.userId, event.body);
     }
 
+    // GET /sessions/{sessionId}/task-progress
+    if (method === "GET" && pathParams?.sessionId && resource.endsWith("/task-progress")) {
+      try {
+        const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+        if (runtimeClaims.sessionId !== pathParams.sessionId) {
+          return createResponse(HTTP_STATUS.CONFLICT, {
+            error: "sessionId does not match runtime token",
+          });
+        }
+        return await handleListTaskProgress(pathParams.sessionId, runtimeClaims);
+      } catch (error) {
+        if (error instanceof RuntimeTokenError) {
+          return createResponse(error.statusCode, { error: error.message });
+        }
+        throw error;
+      }
+    }
+
+    // PUT /sessions/{sessionId}/task-progress/{progressKey}/complete
+    if (
+      method === "PUT" &&
+      pathParams?.sessionId &&
+      pathParams?.progressKey &&
+      resource.includes("/task-progress/") &&
+      resource.endsWith("/complete")
+    ) {
+      try {
+        const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+        if (runtimeClaims.sessionId !== pathParams.sessionId) {
+          return createResponse(HTTP_STATUS.CONFLICT, {
+            error: "sessionId does not match runtime token",
+          });
+        }
+        return await handleCompleteTaskProgress(
+          pathParams.sessionId,
+          pathParams.progressKey,
+          runtimeClaims,
+          event.body
+        );
+      } catch (error) {
+        if (error instanceof RuntimeTokenError) {
+          return createResponse(error.statusCode, { error: error.message });
+        }
+        throw error;
+      }
+    }
+
     // PUT /sessions/{sessionId}/complete
-    if (method === "PUT" && pathParams?.sessionId && resource.includes("/complete")) {
+    if (method === "PUT" && pathParams?.sessionId && resource.includes("/complete") && !resource.includes("/task-progress/")) {
       try {
         const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
         if (runtimeClaims.sessionId !== pathParams.sessionId) {
@@ -692,6 +760,232 @@ async function handleUpdateTurn(
 
   return createResponse(HTTP_STATUS.OK, {
     turn: buildSessionTurnView(mergedTurn),
+  });
+}
+
+function trimOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function decodePathParam(value: string): string {
+  try {
+    return decodeURIComponent(value).trim();
+  } catch {
+    return value.trim();
+  }
+}
+
+interface TaskProgressIdentity {
+  phaseId: string;
+  sectionId?: string;
+  taskId?: string;
+  taskType?: string;
+  latestEvidenceId?: string;
+  progressKey: string;
+}
+
+function parseTaskProgressIdentity(
+  progressKeyParam: string,
+  payload: Record<string, unknown>
+): { identity?: TaskProgressIdentity; error?: string } {
+  const phaseId = trimOptionalString(payload.phaseId);
+  if (!phaseId) {
+    return { error: "phaseId is required" };
+  }
+
+  const sectionId = trimOptionalString(payload.sectionId);
+  const taskId = trimOptionalString(payload.taskId);
+  if (!taskId && !sectionId) {
+    return { error: "Provide taskId or sectionId to identify task progress" };
+  }
+
+  const state = trimOptionalString(payload.state);
+  if (state && state !== "completed") {
+    return { error: "state, when provided, must be completed" };
+  }
+
+  const taskType = trimOptionalString(payload.taskType);
+  const latestEvidenceId = trimOptionalString(payload.latestEvidenceId);
+  const derivedProgressKey = `${phaseId}#${taskId || sectionId}`;
+  const pathProgressKey = decodePathParam(progressKeyParam);
+
+  if (!pathProgressKey) {
+    return { error: "progressKey path parameter is required" };
+  }
+
+  if (pathProgressKey !== derivedProgressKey) {
+    return {
+      error: `progressKey must match task identity: ${derivedProgressKey}`,
+    };
+  }
+
+  return {
+    identity: {
+      phaseId,
+      ...(sectionId ? { sectionId } : {}),
+      ...(taskId ? { taskId } : {}),
+      ...(taskType ? { taskType } : {}),
+      ...(latestEvidenceId ? { latestEvidenceId } : {}),
+      progressKey: derivedProgressKey,
+    },
+  };
+}
+
+function buildTaskProgressId(sessionId: string, progressKey: string): string {
+  return `${sessionId}#${progressKey}`;
+}
+
+async function resolveRuntimeSession(sessionId: string, runtimeClaims: RuntimeClaims) {
+  const session = await getItem(SESSION_TABLE, { sessionId }, dynamo);
+  if (!session) return notFoundResponse("Session not found");
+
+  if (session.assignmentId !== runtimeClaims.assignmentId) {
+    return createResponse(HTTP_STATUS.CONFLICT, {
+      error: "assignmentId does not match runtime token",
+    });
+  }
+
+  if (session.studentUserId !== runtimeClaims.sub) {
+    return createResponse(HTTP_STATUS.FORBIDDEN, {
+      error: "Cannot access another student's session",
+    });
+  }
+
+  return session as SessionRecord;
+}
+
+function toTaskProgressView(row: Partial<SessionTaskProgressRecord>): SessionTaskProgressRecord {
+  return {
+    progressId: String(row.progressId ?? ""),
+    sessionId: String(row.sessionId ?? ""),
+    progressKey: String(row.progressKey ?? ""),
+    assignmentId: String(row.assignmentId ?? ""),
+    studentUserId: String(row.studentUserId ?? ""),
+    phaseId: String(row.phaseId ?? ""),
+    ...(trimOptionalString(row.sectionId) ? { sectionId: trimOptionalString(row.sectionId) } : {}),
+    ...(trimOptionalString(row.taskId) ? { taskId: trimOptionalString(row.taskId) } : {}),
+    ...(trimOptionalString(row.taskType) ? { taskType: trimOptionalString(row.taskType) } : {}),
+    state: "completed",
+    completedAt: String(row.completedAt ?? ""),
+    ...(trimOptionalString(row.latestEvidenceId) ? { latestEvidenceId: trimOptionalString(row.latestEvidenceId) } : {}),
+    createdAt: String(row.createdAt ?? ""),
+    updatedAt: String(row.updatedAt ?? ""),
+  };
+}
+
+async function handleCompleteTaskProgress(
+  sessionId: string,
+  progressKeyParam: string,
+  runtimeClaims: RuntimeClaims,
+  body: string | null
+) {
+  if (!SESSION_TASK_PROGRESS_TABLE) {
+    return serverErrorResponse("Session task progress is not configured");
+  }
+
+  const sessionOutcome = await resolveRuntimeSession(sessionId, runtimeClaims);
+  if ("statusCode" in sessionOutcome) return sessionOutcome;
+  const session = sessionOutcome;
+
+  let payload: unknown;
+  try {
+    payload = parseJsonBody(body);
+  } catch (error) {
+    return badRequestResponse(error instanceof Error ? error.message : "Invalid JSON format in request body");
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return badRequestResponse("Request body must be a JSON object");
+  }
+
+  const parsedIdentity = parseTaskProgressIdentity(
+    progressKeyParam,
+    payload as Record<string, unknown>
+  );
+  if (!parsedIdentity.identity) {
+    return badRequestResponse(parsedIdentity.error ?? "Invalid task progress identity");
+  }
+  const identity = parsedIdentity.identity;
+  const progressId = buildTaskProgressId(sessionId, identity.progressKey);
+
+  const existing = await getItem(
+    SESSION_TASK_PROGRESS_TABLE,
+    { progressId },
+    dynamo
+  ) as SessionTaskProgressRecord | null;
+
+  if (existing) {
+    if (
+      session.status === "active" &&
+      identity.latestEvidenceId &&
+      existing.latestEvidenceId !== identity.latestEvidenceId
+    ) {
+      const updated = {
+        ...existing,
+        latestEvidenceId: identity.latestEvidenceId,
+        updatedAt: generateTimestamp(),
+      };
+      await putItem(SESSION_TASK_PROGRESS_TABLE, updated, dynamo);
+      return createResponse(HTTP_STATUS.OK, { progress: toTaskProgressView(updated) });
+    }
+
+    return createResponse(HTTP_STATUS.OK, { progress: toTaskProgressView(existing) });
+  }
+
+  if (session.status !== "active") {
+    return conflictResponse("Session is not active");
+  }
+
+  const now = generateTimestamp();
+  const progress: SessionTaskProgressRecord = {
+    progressId,
+    sessionId,
+    progressKey: identity.progressKey,
+    assignmentId: session.assignmentId,
+    studentUserId: session.studentUserId,
+    phaseId: identity.phaseId,
+    ...(identity.sectionId ? { sectionId: identity.sectionId } : {}),
+    ...(identity.taskId ? { taskId: identity.taskId } : {}),
+    ...(identity.taskType ? { taskType: identity.taskType } : {}),
+    state: "completed",
+    completedAt: now,
+    ...(identity.latestEvidenceId ? { latestEvidenceId: identity.latestEvidenceId } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await putItem(SESSION_TASK_PROGRESS_TABLE, progress, dynamo);
+
+  return createResponse(HTTP_STATUS.OK, { progress: toTaskProgressView(progress) });
+}
+
+async function handleListTaskProgress(sessionId: string, runtimeClaims: RuntimeClaims) {
+  if (!SESSION_TASK_PROGRESS_TABLE) {
+    return serverErrorResponse("Session task progress is not configured");
+  }
+
+  const sessionOutcome = await resolveRuntimeSession(sessionId, runtimeClaims);
+  if ("statusCode" in sessionOutcome) return sessionOutcome;
+  const session = sessionOutcome;
+
+  const rows = await queryItems(
+    SESSION_TASK_PROGRESS_TABLE,
+    "sessionId = :sid",
+    { ":sid": sessionId },
+    dynamo,
+    {
+      indexName: SESSION_TASK_PROGRESS_BY_SESSION_INDEX,
+      scanIndexForward: true,
+    }
+  );
+
+  const progress = rows
+    .map((row) => toTaskProgressView(row))
+    .sort((a, b) => a.progressKey.localeCompare(b.progressKey));
+
+  return createResponse(HTTP_STATUS.OK, {
+    sessionId,
+    assignmentId: session.assignmentId,
+    progress,
   });
 }
 

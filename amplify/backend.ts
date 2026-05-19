@@ -62,7 +62,7 @@ import { eventLogFunction } from "./functions/event-log-function/resource";
 import { migrationFunction } from "./functions/migration-function/resource";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
-import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { type IGrantable, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { BlockPublicAccess, Bucket, BucketEncryption, HttpMethods } from "aws-cdk-lib/aws-s3";
 
 const backend = defineBackend({
@@ -158,6 +158,7 @@ const enrollmentTable = backend.data.resources.tables["AssignmentEnrollment"];
 const sessionTable = backend.data.resources.tables["SimulationSession"];
 const turnTable = backend.data.resources.tables["SessionTurn"];
 const evaluationTable = backend.data.resources.tables["SessionEvaluation"];
+const sessionTaskProgressTable = backend.data.resources.tables["SessionTaskProgress"];
 const surveyTemplateTable = backend.data.resources.tables["SurveyTemplate"];
 const surveyResponseTable = backend.data.resources.tables["AssignmentSurveyResponse"];
 
@@ -194,6 +195,7 @@ unityBuildTable.grantReadData(backend.sessionFunction.resources.lambda);
 enrollmentTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
 turnTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
 evaluationTable.grantReadData(backend.sessionFunction.resources.lambda);
+sessionTaskProgressTable.grantReadWriteData(backend.sessionFunction.resources.lambda);
 backend.sessionFunction.addEnvironment("TABLE_NAME", sessionTable.tableName);
 backend.sessionFunction.addEnvironment("ASSIGNMENT_TABLE_NAME", assignmentTable.tableName);
 backend.sessionFunction.addEnvironment("SCENE_CATALOG_TABLE_NAME", sceneCatalogTable.tableName);
@@ -202,6 +204,14 @@ backend.sessionFunction.addEnvironment("UNITY_BUILD_TABLE_NAME", unityBuildTable
 backend.sessionFunction.addEnvironment("ENROLLMENT_TABLE_NAME", enrollmentTable.tableName);
 backend.sessionFunction.addEnvironment("TURN_TABLE_NAME", turnTable.tableName);
 backend.sessionFunction.addEnvironment("EVALUATION_TABLE_NAME", evaluationTable.tableName);
+backend.sessionFunction.addEnvironment(
+  "SESSION_TASK_PROGRESS_TABLE_NAME",
+  sessionTaskProgressTable.tableName
+);
+backend.sessionFunction.addEnvironment(
+  "SESSION_TASK_PROGRESS_BY_SESSION_INDEX_NAME",
+  "bySessionProgressKey"
+);
 
 // Survey Template function — needs templates and responses
 surveyTemplateTable.grantReadWriteData(backend.surveyTemplateFunction.resources.lambda);
@@ -236,7 +246,12 @@ const consentDecisionTable = backend.data.resources.tables["ConsentDecision"];
 const sessionEvidenceTable = backend.data.resources.tables["SessionEvidence"];
 
 // Helper: attach common course-auth env vars to a function so requireCourseInstructor/etc. work.
-function attachCourseAuthEnv(fn: any) {
+type BackendFunctionLike = {
+  addEnvironment(name: string, value: string): void;
+  resources: { lambda: IGrantable };
+};
+
+function attachCourseAuthEnv(fn: BackendFunctionLike) {
   fn.addEnvironment("COURSE_TABLE_NAME", courseTable.tableName);
   fn.addEnvironment("COURSE_INSTRUCTOR_TABLE_NAME", courseInstructorTable.tableName);
   fn.addEnvironment("COURSE_ENROLLMENT_TABLE_NAME", courseEnrollmentTable.tableName);
@@ -245,7 +260,7 @@ function attachCourseAuthEnv(fn: any) {
   fn.addEnvironment("ASSIGNMENT_TABLE_NAME", assignmentTable.tableName);
   fn.addEnvironment("SESSION_TABLE_NAME", sessionTable.tableName);
 }
-function grantCourseAuthReadTables(fn: any) {
+function grantCourseAuthReadTables(fn: BackendFunctionLike) {
   courseTable.grantReadData(fn.resources.lambda);
   courseInstructorTable.grantReadData(fn.resources.lambda);
   courseEnrollmentTable.grantReadData(fn.resources.lambda);
@@ -820,6 +835,11 @@ const sessionCompletePath = sessionItemPath.addResource("complete");
 sessionCompletePath.addMethod("PUT", sessionLambdaIntegration, publicMethodOptions);
 const sessionRuntimeTokenPath = sessionItemPath.addResource("runtime-token");
 sessionRuntimeTokenPath.addMethod("POST", sessionLambdaIntegration, cognitoMethodOptions);
+const sessionTaskProgressPath = sessionItemPath.addResource("task-progress");
+sessionTaskProgressPath.addMethod("GET", sessionLambdaIntegration, publicMethodOptions);
+const sessionTaskProgressItemPath = sessionTaskProgressPath.addResource("{progressKey}");
+const sessionTaskProgressCompletePath = sessionTaskProgressItemPath.addResource("complete");
+sessionTaskProgressCompletePath.addMethod("PUT", sessionLambdaIntegration, publicMethodOptions);
 const sessionTurnsPath = sessionItemPath.addResource("turns");
 const sessionTurnItemPath = sessionTurnsPath.addResource("{turnIndex}");
 sessionTurnItemPath.addMethod("PUT", sessionLambdaIntegration, publicMethodOptions);

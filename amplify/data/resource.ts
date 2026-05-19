@@ -179,6 +179,29 @@ const schema = a.schema({
     .identifier(["sessionId"])
     .authorization((allow) => [allow.authenticated()]),
 
+  SessionTaskProgress: a
+    .model({
+      progressId: a.string().required(),
+      sessionId: a.string().required(),
+      progressKey: a.string().required(),
+      assignmentId: a.string().required(),
+      studentUserId: a.string().required(),
+      phaseId: a.string().required(),
+      sectionId: a.string(),
+      taskId: a.string(),
+      taskType: a.string(),
+      state: a.string().required(),
+      completedAt: a.string().required(),
+      latestEvidenceId: a.string(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(["progressId"])
+    .secondaryIndexes((index) => [
+      index("sessionId").sortKeys(["progressKey"]).name("bySessionProgressKey"),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   SurveyTemplate: a
     .model({
       surveyTemplateId: a.string().required(),
