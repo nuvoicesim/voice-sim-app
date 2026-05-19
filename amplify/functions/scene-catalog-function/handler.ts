@@ -88,7 +88,15 @@ async function handleListScenes() {
 
 async function handleCreateScene(body: string | null) {
   const payload = parseJsonBody(body);
-  const { scenarioKey, title, description, difficulty, tags, unityBuildId } = payload;
+  const {
+    scenarioKey,
+    title,
+    description,
+    difficulty,
+    tags,
+    unityBuildId,
+    requiredTaskKeys,
+  } = payload;
 
   if (!scenarioKey || !title) {
     return badRequestResponse("Missing required fields: scenarioKey, title");
@@ -120,6 +128,12 @@ async function handleCreateScene(body: string | null) {
     tags: tags || [],
     unityBuildId: unityBuildId.trim(),
     unityBuildFolder: "",
+    // Persist requiredTaskKeys only when caller supplied an array. This
+    // mirrors the existing `tags: tags || []` shape and matches the backend
+    // auto-completion contract: missing, null, and empty-array are all
+    // treated as "auto-completion is not configured for this scene"
+    // (loadRequiredTaskKeysForAssignment in session-function/handler.ts).
+    requiredTaskKeys: Array.isArray(requiredTaskKeys) ? requiredTaskKeys : [],
     isActive: true,
     createdAt: now,
     updatedAt: now,
