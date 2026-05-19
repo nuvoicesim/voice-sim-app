@@ -431,6 +431,35 @@ const schema = a.schema({
     })
     .identifier(["consentItemId", "studentUserId"])
     .authorization((allow) => [allow.authenticated()]),
+
+  // VOICE user-study raw evidence rows, written by llm-scoring-function for
+  // both Phase 1 rubric submissions and Phase 2 training submissions. The full
+  // original Unity request body is preserved as rawEvidencePayload so future
+  // Phase 3 debrief reuse and future Phase 2 cue telemetry land here without
+  // schema migration. Normalized lookup columns mirror the most-queried
+  // identifiers.
+  SessionEvidence: a
+    .model({
+      evidenceId: a.string().required(),
+      sessionId: a.string().required(),
+      assignmentId: a.string().required(),
+      studentUserId: a.string().required(),
+      phaseId: a.string().required(),
+      taskType: a.string(),
+      sectionId: a.string(),
+      taskId: a.string(),
+      itemId: a.string(),
+      patientProfileId: a.string(),
+      feedbackUse: a.string(),
+      scoringMode: a.string(),
+      promptVersion: a.string(),
+      rawEvidencePayload: a.json().required(),
+      rubricAssessmentPayload: a.json(),
+      submittedAt: a.string().required(),
+      createdAt: a.string().required(),
+    })
+    .identifier(["evidenceId"])
+    .authorization((allow) => [allow.authenticated()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
