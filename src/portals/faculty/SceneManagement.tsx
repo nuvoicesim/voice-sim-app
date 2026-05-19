@@ -21,6 +21,11 @@ interface Scene {
   tags: string[];
   unityBuildId?: string | null;
   unityBuildFolder: string;
+  // Optional array of canonical task progress keys (format:
+  // `${phaseId}#${taskId || sectionId}`) that must all be completed before
+  // backend auto-session-complete fires. Absent on legacy rows; UI shows a
+  // blank textarea in that case.
+  requiredTaskKeys?: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -51,7 +56,30 @@ const EMPTY_FORM = {
   difficulty: 'intermediate',
   tags: '',
   unityBuildId: '',
+  // Multiline textarea contents (one canonical task progress key per line).
+  // Parsed into string[] at submit time inside handleSave.
+  requiredTaskKeys: '',
 };
+
+// Parse the multiline textarea contents into a clean string[]:
+//   - split on any newline sequence
+//   - trim whitespace
+//   - drop blank lines
+//   - preserve entry order
+//   - deduplicate exact repeated keys (case-sensitive, order-preserving)
+function parseRequiredTaskKeysInput(raw: string): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
 
 function SceneCard({
   scene,
@@ -229,6 +257,9 @@ export default function SceneManagement() {
       difficulty: scene.difficulty || 'intermediate',
       tags: Array.isArray(scene.tags) ? scene.tags.join(', ') : '',
       unityBuildId: scene.unityBuildId || '',
+      requiredTaskKeys: Array.isArray(scene.requiredTaskKeys)
+        ? scene.requiredTaskKeys.join('\n')
+        : '',
     });
     setModalOpen(true);
   };
@@ -248,6 +279,11 @@ export default function SceneManagement() {
         difficulty: form.difficulty,
         tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
         unityBuildId: form.unityBuildId || null,
+        // Always include requiredTaskKeys (sending [] when blank mirrors the
+        // existing `tags` field pattern in this form). Backend
+        // loadRequiredTaskKeysForAssignment treats [] and absent the same
+        // way (auto-complete no-ops), so this is a safe default.
+        requiredTaskKeys: parseRequiredTaskKeysInput(form.requiredTaskKeys),
       };
       if (editingScene) {
         await sceneCatalogApi.update(editingScene.sceneId, payload);
@@ -401,6 +437,16 @@ export default function SceneManagement() {
             placeholder="comma-separated, e.g. aphasia, broca, mild"
             value={form.tags}
             onChange={(e) => setForm((prev) => ({ ...prev, tags: e.target.value }))}
+            radius="md"
+          />
+          <Textarea
+            label="Required Task Keys"
+            description="One key per line. The session is marked complete only after all listed task keys are completed."
+            placeholder={"phase1#phase1-section-c\nphase1#phase1-section-d"}
+            value={form.requiredTaskKeys}
+            onChange={(e) => setForm((prev) => ({ ...prev, requiredTaskKeys: e.target.value }))}
+            minRows={3}
+            autosize
             radius="md"
           />
           <Group justify="flex-end" mt="sm">
