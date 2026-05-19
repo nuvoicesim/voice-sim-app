@@ -1035,27 +1035,27 @@ async function maybeAutoCompleteSessionIfRequiredTasksDone(
     const requiredKeys = await loadRequiredTaskKeysForAssignment(session.assignmentId);
     if (!requiredKeys || requiredKeys.length === 0) return;
 
-    const rows = await queryItems(
-      SESSION_TASK_PROGRESS_TABLE,
-      "sessionId = :sid",
-      { ":sid": session.sessionId },
-      dynamo,
-      {
-        indexName: SESSION_TASK_PROGRESS_BY_SESSION_INDEX,
-        scanIndexForward: true,
-      }
-    );
-
-    const observedKeys = new Set<string>();
-    for (const row of rows) {
-      const key = (row as Record<string, unknown>).progressKey;
-      if (typeof key === "string" && key.trim() !== "") {
-        observedKeys.add(key.trim());
-      }
-    }
-
-    for (const required of requiredKeys) {
-      if (!observedKeys.has(required)) return;
+    // Required-key coverage MUST use deterministic primary-key reads, not the
+    // bySessionProgressKey GSI. The GSI is eventually consistent: the row we
+    // just wrote in handleCompleteTaskProgress may not yet appear in a GSI
+    // query result, which would make this function falsely conclude the
+    // required set is incomplete and leave the session active. The pure
+    // idempotent re-read path of handleCompleteTaskProgress does not retry
+    // auto-completion, so a missed coverage check would not self-correct.
+    //
+    // SessionTaskProgress.progressId is the deterministic primary key
+    // `${sessionId}#${progressKey}` (see buildTaskProgressId), so a getItem
+    // per required key always returns the freshly-written row immediately
+    // after the PutItem completes. requiredKeys is a small bounded list, so
+    // the per-key getItem cost is acceptable here.
+    for (const requiredKey of requiredKeys) {
+      const progressId = buildTaskProgressId(session.sessionId, requiredKey);
+      const row = await getItem(
+        SESSION_TASK_PROGRESS_TABLE,
+        { progressId },
+        dynamo
+      );
+      if (!row) return;
     }
 
     // Re-fetch the latest session record before completing to avoid acting on
