@@ -1050,10 +1050,16 @@ async function maybeAutoCompleteSessionIfRequiredTasksDone(
     // the per-key getItem cost is acceptable here.
     for (const requiredKey of requiredKeys) {
       const progressId = buildTaskProgressId(session.sessionId, requiredKey);
+      // ConsistentRead is required here: this helper runs immediately after
+      // a SessionTaskProgress PutItem. A default eventually-consistent read
+      // could miss the row we just wrote and falsely conclude the required
+      // set is incomplete, leaving the session active. Strong consistency
+      // on a deterministic primary-key read closes that window.
       const row = await getItem(
         SESSION_TASK_PROGRESS_TABLE,
         { progressId },
-        dynamo
+        dynamo,
+        { consistentRead: true }
       );
       if (!row) return;
     }

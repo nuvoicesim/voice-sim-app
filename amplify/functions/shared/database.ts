@@ -21,23 +21,30 @@ export function createDynamoDbClient(): DynamoDBDocumentClient {
  * @param tableName - Name of the DynamoDB table
  * @param key - Primary key object
  * @param dynamo - DynamoDB client instance
+ * @param options - Optional read options
+ *   - consistentRead: when true, issues a strongly-consistent read by setting
+ *     the GetCommand `ConsistentRead` flag. Default is omitted (DynamoDB's
+ *     default eventually-consistent read), which preserves prior behavior for
+ *     every existing caller.
  * @returns Item from database or null if not found
  */
 export async function getItem(
-  tableName: string | undefined, 
+  tableName: string | undefined,
   key: Record<string, any>,
-  dynamo: DynamoDBDocumentClient
+  dynamo: DynamoDBDocumentClient,
+  options?: { consistentRead?: boolean }
 ): Promise<any | null> {
   if (!tableName) {
     throw new Error("Table name is required");
   }
-  
+
   try {
     const result = await dynamo.send(new GetCommand({
       TableName: tableName,
-      Key: key
+      Key: key,
+      ...(options?.consistentRead ? { ConsistentRead: true } : {}),
     }));
-    
+
     return result.Item || null;
   } catch (error) {
     console.error("Error getting item from DynamoDB:", error);
