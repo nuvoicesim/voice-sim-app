@@ -925,9 +925,15 @@ async function handleCompleteTaskProgress(
         updatedAt: generateTimestamp(),
       };
       await putItem(SESSION_TASK_PROGRESS_TABLE, updated, dynamo);
+      // latestEvidenceId rotation represents a fresh user action on this task,
+      // so re-evaluate whole-session completion in case this completes the set.
+      await maybeAutoCompleteSessionIfRequiredTasksDone(session);
       return createResponse(HTTP_STATUS.OK, { progress: toTaskProgressView(updated) });
     }
 
+    // Pure idempotent re-read of an existing row with no mutation: skip the
+    // auto-complete recomputation; the session state cannot have transitioned
+    // because of this call.
     return createResponse(HTTP_STATUS.OK, { progress: toTaskProgressView(existing) });
   }
 
@@ -955,7 +961,123 @@ async function handleCompleteTaskProgress(
 
   await putItem(SESSION_TASK_PROGRESS_TABLE, progress, dynamo);
 
+  // First-time creation of this internal task's completion row may be the
+  // event that completes the whole required set.
+  await maybeAutoCompleteSessionIfRequiredTasksDone(session);
+
   return createResponse(HTTP_STATUS.OK, { progress: toTaskProgressView(progress) });
+}
+
+// Loads the scene-configured required-task-key set for the assignment behind
+// `assignmentId`. Returns a sanitized, deduplicated array of non-empty strings,
+// or null when:
+//   - the supporting tables are not configured
+//   - the assignment, scene, or assignment.sceneId is missing
+//   - `requiredTaskKeys` is absent, null, not an array, or contains only
+//     garbage entries after sanitization
+// A null return means "auto-completion is not configured for this scene" and
+// callers must treat that as a no-op (NOT as an error).
+async function loadRequiredTaskKeysForAssignment(
+  assignmentId: string | undefined
+): Promise<string[] | null> {
+  if (!ASSIGNMENT_TABLE || !SCENE_CATALOG_TABLE) return null;
+  if (!assignmentId || typeof assignmentId !== "string") return null;
+
+  try {
+    const assignment = await getItem(ASSIGNMENT_TABLE, { assignmentId }, dynamo);
+    const sceneId = assignment?.sceneId;
+    if (typeof sceneId !== "string" || sceneId.trim() === "") return null;
+
+    const scene = await getItem(SCENE_CATALOG_TABLE, { sceneId }, dynamo);
+    if (!scene) return null;
+
+    const raw = (scene as Record<string, unknown>).requiredTaskKeys;
+    if (!Array.isArray(raw)) return null;
+
+    const sanitized: string[] = [];
+    const seen = new Set<string>();
+    for (const entry of raw) {
+      if (typeof entry !== "string") continue;
+      const trimmed = entry.trim();
+      if (trimmed === "") continue;
+      if (seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      sanitized.push(trimmed);
+    }
+    return sanitized.length > 0 ? sanitized : null;
+  } catch (error) {
+    console.warn("loadRequiredTaskKeysForAssignment failed", {
+      assignmentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+// Evaluates whether every required progressKey for this session's scene is
+// covered by completed SessionTaskProgress rows; if so, completes the whole
+// session via the shared completeSessionInternal helper.
+//
+// Safe-fail contract:
+//   - Errors are logged and swallowed; auto-complete failure must NEVER fail
+//     the task-progress write that just succeeded.
+//   - If the session is already completed (race with explicit /complete or a
+//     concurrent auto-complete), short-circuit before any writes.
+//   - If requiredTaskKeys is missing/empty/malformed, treat as "not configured"
+//     and return silently.
+async function maybeAutoCompleteSessionIfRequiredTasksDone(
+  session: SessionRecord
+): Promise<void> {
+  try {
+    if (session.status === "completed") return;
+    if (!SESSION_TASK_PROGRESS_TABLE) return;
+
+    const requiredKeys = await loadRequiredTaskKeysForAssignment(session.assignmentId);
+    if (!requiredKeys || requiredKeys.length === 0) return;
+
+    // Required-key coverage MUST use deterministic primary-key reads, not the
+    // bySessionProgressKey GSI. The GSI is eventually consistent: the row we
+    // just wrote in handleCompleteTaskProgress may not yet appear in a GSI
+    // query result, which would make this function falsely conclude the
+    // required set is incomplete and leave the session active. The pure
+    // idempotent re-read path of handleCompleteTaskProgress does not retry
+    // auto-completion, so a missed coverage check would not self-correct.
+    //
+    // SessionTaskProgress.progressId is the deterministic primary key
+    // `${sessionId}#${progressKey}` (see buildTaskProgressId), so a getItem
+    // per required key always returns the freshly-written row immediately
+    // after the PutItem completes. requiredKeys is a small bounded list, so
+    // the per-key getItem cost is acceptable here.
+    for (const requiredKey of requiredKeys) {
+      const progressId = buildTaskProgressId(session.sessionId, requiredKey);
+      // ConsistentRead is required here: this helper runs immediately after
+      // a SessionTaskProgress PutItem. A default eventually-consistent read
+      // could miss the row we just wrote and falsely conclude the required
+      // set is incomplete, leaving the session active. Strong consistency
+      // on a deterministic primary-key read closes that window.
+      const row = await getItem(
+        SESSION_TASK_PROGRESS_TABLE,
+        { progressId },
+        dynamo,
+        { consistentRead: true }
+      );
+      if (!row) return;
+    }
+
+    // Re-fetch the latest session record before completing to avoid acting on
+    // a stale snapshot (another concurrent caller may have already completed).
+    const latest = await getItem(SESSION_TABLE, { sessionId: session.sessionId }, dynamo);
+    if (!latest) return;
+    const latestSession = latest as SessionRecord;
+    if (latestSession.status === "completed") return;
+
+    await completeSessionInternal(latestSession, generateTimestamp());
+  } catch (error) {
+    console.warn("maybeAutoCompleteSessionIfRequiredTasksDone failed", {
+      sessionId: session?.sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function handleListTaskProgress(sessionId: string, runtimeClaims: RuntimeClaims) {
@@ -997,12 +1119,34 @@ async function handleCompleteSession(sessionId: string, studentUserId: string) {
     return createResponse(HTTP_STATUS.FORBIDDEN, { error: "Cannot complete another student's session" });
   }
 
+  // Explicit route preserves the existing external 409 contract: if the
+  // session is already completed (e.g. via the auto-complete-from-task-
+  // progress path), surface that to the caller rather than silently no-op.
   if (session.status === "completed") {
     return conflictResponse("Session is already completed");
   }
 
   const now = generateTimestamp();
-  const updated = {
+  const updated = await completeSessionInternal(session as SessionRecord, now);
+
+  return createResponse(HTTP_STATUS.OK, { session: await enrichSessionForLaunch(updated) });
+}
+
+// Shared internal helper used by:
+//   - the explicit PUT /sessions/{sessionId}/complete route
+//   - the auto-complete path triggered from successful task-progress writes
+//
+// Idempotent: if the session is already completed when called, returns the
+// existing record unchanged without re-emitting side effects.
+async function completeSessionInternal(
+  session: SessionRecord,
+  now: string
+): Promise<SessionRecord> {
+  if (session.status === "completed") {
+    return session;
+  }
+
+  const updated: SessionRecord = {
     ...session,
     status: "completed",
     endedAt: now,
@@ -1015,7 +1159,7 @@ async function handleCompleteSession(sessionId: string, studentUserId: string) {
   // via llm-scoring-function which then updates bestSessionId/Score.
   await markCourseProgressCompleted(updated.assignmentId, updated.studentUserId, now);
 
-  return createResponse(HTTP_STATUS.OK, { session: await enrichSessionForLaunch(updated) });
+  return updated;
 }
 
 async function markCourseProgressCompleted(

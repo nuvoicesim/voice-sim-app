@@ -57,6 +57,18 @@ const schema = a.schema({
       tags: a.json(),
       unityBuildId: a.string(),
       unityBuildFolder: a.string(),
+      // Optional array<string> of canonical progressKey values that MUST be
+      // completed for this scene to be considered fully done. Used by the
+      // session-function task-progress complete handler to auto-complete the
+      // whole SimulationSession (and the linked StudentItemProgress) once all
+      // required internal tasks have been recorded as completed. Each entry
+      // follows the same format the task-progress handler validates:
+      //   `${phaseId}#${taskId || sectionId}`
+      // Examples:
+      //   ["phase1#phase1-section-c", "phase1#phase1-section-d"]
+      //   ["phase2#phase2-ben-object-naming", "phase2#phase2-ben-sentence-completion"]
+      // When absent, null, empty, or malformed, auto-completion is skipped.
+      requiredTaskKeys: a.json(),
       isActive: a.boolean().required(),
       createdAt: a.string().required(),
       updatedAt: a.string().required(),
