@@ -106,7 +106,7 @@ function ConversationBubble({ turn }: { turn: SessionTurn }) {
                 borderBottomRightRadius: 4,
               }}
             >
-              <Text size="sm" c="var(--claude-ivory)" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
+              <Text size="sm" c="var(--claude-near-black)" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
               {studentSpeechDuration && (
                 <Group gap={4} mt={4} justify="flex-end" wrap="nowrap">
                   <IconBolt size={10} style={{ color: 'rgba(250,249,245,0.85)' }} />
