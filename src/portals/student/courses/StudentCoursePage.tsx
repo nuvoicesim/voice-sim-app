@@ -146,6 +146,7 @@ function StudentCoursePageInner() {
               const moduleGating = evaluateModuleGating(
                 m,
                 moduleTitleById,
+                itemsById,
                 itemsByModule,
                 progressByItem,
                 myGroupKeys
@@ -363,11 +364,28 @@ function evaluateGatingOnly(
     const prereqModuleId = gating.moduleId;
     const itemsInModule = itemsByModuleId[prereqModuleId] || [];
     if (itemsInModule.length === 0) return { locked: false };
-    const allDone = itemsInModule.every((i: any) =>
+    // Exclude items that are hidden for the current student (counter-balanced
+    // branch). `evaluateGatingOnly` propagates `hidden` through all_of and
+    // through after_item chains whose prereq is off-branch — coverage that
+    // isItemEffectivelyDone alone misses (e.g. a Group A survey gated as
+    // after_item: <Group A assignment> would otherwise count as remaining for
+    // a Group B student).
+    const applicableItems = itemsInModule.filter((i: any) => {
+      const gate = evaluateGatingOnly(
+        i,
+        itemsById,
+        progressByItem,
+        itemsByModuleId,
+        myGroupKeys
+      );
+      return !gate.hidden;
+    });
+    if (applicableItems.length === 0) return { locked: false };
+    const allDone = applicableItems.every((i: any) =>
       isItemEffectivelyDone(i, progressByItem[i.moduleItemId], myGroupKeys)
     );
     if (allDone) return { locked: false };
-    const remaining = itemsInModule.filter(
+    const remaining = applicableItems.filter(
       (i: any) =>
         !isItemEffectivelyDone(i, progressByItem[i.moduleItemId], myGroupKeys)
     );
@@ -490,6 +508,7 @@ function evaluateGating(
 function evaluateModuleGating(
   module: any,
   moduleTitleById: Record<string, string>,
+  itemsById: Record<string, any>,
   itemsByModuleId: Record<string, any[]>,
   progressByItem: Record<string, any>,
   myGroupKeys: string[]
@@ -501,11 +520,27 @@ function evaluateModuleGating(
     const prereqModuleId = gating.moduleId;
     const itemsInModule = itemsByModuleId[prereqModuleId] || [];
     if (itemsInModule.length === 0) return { locked: false };
-    const allDone = itemsInModule.every((i: any) =>
+    // Mirror the visible-rendering filter: drop items that are hidden for the
+    // current student so off-branch items don't count toward "remaining".
+    // evaluateGatingOnly handles group_in directly, all_of recursively, and
+    // after_item chains where the prereq is off-branch — which is the
+    // failure mode of the prior isItemRelevantToMe-only filter.
+    const applicableItems = itemsInModule.filter((i: any) => {
+      const gate = evaluateGatingOnly(
+        i,
+        itemsById,
+        progressByItem,
+        itemsByModuleId,
+        myGroupKeys
+      );
+      return !gate.hidden;
+    });
+    if (applicableItems.length === 0) return { locked: false };
+    const allDone = applicableItems.every((i: any) =>
       isItemEffectivelyDone(i, progressByItem[i.moduleItemId], myGroupKeys)
     );
     if (allDone) return { locked: false };
-    const remaining = itemsInModule.filter(
+    const remaining = applicableItems.filter(
       (i: any) =>
         !isItemEffectivelyDone(i, progressByItem[i.moduleItemId], myGroupKeys)
     );
