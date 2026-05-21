@@ -252,6 +252,18 @@ function isItemRelevantToMe(item: any, myGroupKeys: string[]): boolean {
     const allowed: string[] = g.groups || [];
     return allowed.some((k) => myGroupKeys.includes(k));
   }
+  // Compound `all_of` gating: item is relevant only when every nested clause is
+  // relevant. A nested `group_in` for a counter-balanced peer therefore
+  // propagates correctly — without this branch, items gated as e.g.
+  // `all_of([group_in: A, after_item: …])` are treated as relevant to Group B
+  // students, causing hidden Group A items to be counted as unfinished in
+  // after_module remaining counts and blocking the next module from unlocking.
+  if (g.kind === "all_of") {
+    const clauses: any[] = g.clauses || [];
+    return clauses.every((clause) =>
+      isItemRelevantToMe({ gating: clause }, myGroupKeys)
+    );
+  }
   return true;
 }
 
