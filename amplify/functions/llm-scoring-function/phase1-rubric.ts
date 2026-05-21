@@ -154,9 +154,13 @@ function safeJsonStringify(value: unknown): string {
 
 function buildUserPrompt(envelope: Phase1RequestEnvelope, cfg: Phase1RubricSectionConfig): string {
   const items = envelope.studyTaskContext?.items ?? [];
-  // Section B prompt also benefits from the full conversation transcript for
-  // detecting examiner examples (horse/tiger) — include it when present.
-  const include_transcript = cfg.sectionId === "B" && Array.isArray(envelope.conversationTurns);
+  // All Phase 1 sections include the full conversation transcript so the rubric
+  // model can cross-reference each item's patientFinalResponse against the
+  // actual student/patient exchange and filter out non-task social turns
+  // (e.g., the patient's reply to a greeting being mis-mapped to A-01).
+  // Section B also relied on the transcript for examiner-example detection
+  // (horse/tiger) and continues to do so.
+  const include_transcript = Array.isArray(envelope.conversationTurns);
 
   const promptPayload: Record<string, unknown> = {
     sectionId: cfg.sectionId,
