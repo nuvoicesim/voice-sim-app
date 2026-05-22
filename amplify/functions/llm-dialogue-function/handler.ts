@@ -596,20 +596,50 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   const latencyMs = Date.now() - startedAt;
-  let resolvedTurnIndex = request.metadata.turnIndex;
+  // request.metadata.turnIndex is Unity's CLIENT-LOCAL counter, which resets
+  // to 0 inside each task/section scene's OpenAIRequest MonoBehaviour.
+  // Multiple scenes in one SimulationSession share the same sessionId, so if
+  // we honored the client hint as the persisted SessionTurn.turnIndex, the
+  // second scene's turn 1 would overwrite the first scene's turn 1 (the
+  // SessionTurn primary key is (sessionId, turnIndex)). The hint is now kept
+  // for diagnostic logging only.
+  // TODO: In the research-grade transcript metadata PR, persist Unity's
+  // local task turn index separately as localTaskTurnIndex/clientTurnIndex
+  // alongside the server-authoritative global turnIndex.
+  const clientTurnIndexHint = request.metadata.turnIndex;
+  let resolvedTurnIndex: number | undefined =
+    typeof clientTurnIndexHint === "number" ? clientTurnIndexHint : undefined;
 
   if (!isPrewarm && request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
     try {
-      if (typeof resolvedTurnIndex !== "number") {
-        const existingTurns = await queryItems(
-          TURN_TABLE_NAME,
-          "sessionId = :sid",
-          { ":sid": request.context.sessionId },
-          dynamo,
-          { scanIndexForward: false, limit: 1 }
-        );
-        resolvedTurnIndex = existingTurns[0]?.turnIndex ? Number(existingTurns[0].turnIndex) + 1 : 1;
-      }
+      // Always compute the next turnIndex server-side from the authoritative
+      // (sessionId, turnIndex) DESC primary-key view. Generalizes the prior
+      // fallback path that only ran when the client omitted the hint.
+      //
+      // Race safety: the voice-driven student UX is strictly sequential
+      // (student speaks → patient responds → student speaks again) so two
+      // concurrent /llm-dialogue requests for the same session are not
+      // expected. If concurrent requests ever become possible (e.g., multi-
+      // device or background pre-generation), upgrade this to a conditional
+      // PutItem with retry, or a dedicated atomic counter — out of scope
+      // for this PR.
+      const existingTurns = await queryItems(
+        TURN_TABLE_NAME,
+        "sessionId = :sid",
+        { ":sid": request.context.sessionId },
+        dynamo,
+        { scanIndexForward: false, limit: 1 }
+      );
+      const lastTurnIndex = existingTurns[0]?.turnIndex
+        ? Number(existingTurns[0].turnIndex)
+        : 0;
+      resolvedTurnIndex = lastTurnIndex + 1;
+
+      console.log("[llm-dialogue] allocated globalTurnIndex", {
+        sessionId: request.context.sessionId,
+        globalTurnIndex: resolvedTurnIndex,
+        clientTurnIndexHint,
+      });
 
       await putItem(
         TURN_TABLE_NAME,
