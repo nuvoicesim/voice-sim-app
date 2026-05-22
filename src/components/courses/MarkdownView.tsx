@@ -1,12 +1,14 @@
 import { Box } from "@mantine/core";
 import { marked } from "marked";
+import { sanitizeMarkdownHtml } from "./sanitizeMarkdownHtml";
 
 export function MarkdownView({ markdown }: { markdown: string }) {
   const html = (() => {
     try {
-      return marked.parse(markdown || "", { async: false }) as string;
+      const parsed = marked.parse(markdown || "", { async: false }) as string;
+      return sanitizeMarkdownHtml(parsed);
     } catch {
-      return markdown || "";
+      return sanitizeMarkdownHtml(markdown || "");
     }
   })();
   return <Box dangerouslySetInnerHTML={{ __html: html }} />;
