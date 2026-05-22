@@ -575,18 +575,66 @@ export default function SessionRunner() {
                 </Button>
               )
             ) : (
-              <Button
-                variant="filled"
-                color="terracotta"
-                size="md"
-                h={46}
-                px="xl"
-                radius="lg"
-                leftSection={<IconChartBar size={16} />}
-                onClick={handleViewResults}
-              >
-                View Results
-              </Button>
+              // Completed / abandoned state. Mirror the active-state
+              // courseContextStatus branching so course-linked sessions
+              // get Back to Course as the primary action regardless of
+              // session.status; only true-legacy completed sessions keep
+              // View Results. Resolving placeholder is reused for the
+              // rare race where status flips to completed before the
+              // assignment lookup finishes.
+              courseContextStatus === 'resolving' || courseContextStatus === 'idle' ? (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  loading
+                  disabled
+                >
+                  Resolving…
+                </Button>
+              ) : courseContextStatus === 'resolved' ? (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  leftSection={<IconArrowBack size={16} />}
+                  onClick={handleBackToCourse}
+                >
+                  Back to Course
+                </Button>
+              ) : courseContextStatus === 'error' ? (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  leftSection={<IconArrowBack size={16} />}
+                  onClick={handleBackToCourse}
+                >
+                  Back to Courses
+                </Button>
+              ) : (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  leftSection={<IconChartBar size={16} />}
+                  onClick={handleViewResults}
+                >
+                  View Results
+                </Button>
+              )
             )}
           </Group>
         </Group>
