@@ -174,6 +174,24 @@ const schema = a.schema({
       motionCode: a.integer(),
       latencyMs: a.integer(),
       timestamp: a.string().required(),
+      // Research-grade transcript metadata. All optional; old rows
+      // without these columns remain valid. Persisted by /llm-dialogue
+      // when the Unity request supplies them. Not consulted by the
+      // course-unlock chain (SessionTaskProgress / requiredTaskKeys /
+      // SimulationSession / StudentItemProgress paths do not read
+      // SessionTurn) so this addition is safe to land independently
+      // from the Unity payload PR.
+      assignmentId: a.string(),
+      phaseId: a.string(),
+      taskId: a.string(),
+      sectionId: a.string(),
+      taskType: a.string(),
+      progressKey: a.string(),
+      itemId: a.string(),
+      itemLabel: a.string(),
+      patientPersonaId: a.string(),
+      clientTurnIndex: a.integer(),
+      cueMetadata: a.json(),
     })
     .identifier(["sessionId", "turnIndex"])
     .authorization((allow) => [allow.authenticated()]),
