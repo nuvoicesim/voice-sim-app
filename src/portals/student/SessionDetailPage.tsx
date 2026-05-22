@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -42,6 +42,26 @@ const PERF_COLORS: Record<string, string> = {
   poor: 'parchment',
 };
 
+const LEGACY_TRANSCRIPT_GROUP_KEY = 'legacy';
+const LEGACY_TRANSCRIPT_GROUP_LABEL = 'Legacy / Ungrouped Conversation';
+
+const TRANSCRIPT_LABELS: Record<string, string> = {
+  'phase1#phase1-section-a': 'Phase 1 Section A: Object Naming',
+  'phase1#phase1-section-b': 'Phase 1 Section B: Word Fluency',
+  'phase1#phase1-section-c': 'Phase 1 Section C: Sentence Completion',
+  'phase1#phase1-section-d': 'Phase 1 Section D: Responsive Speech',
+  'phase2#phase2-ben-object-naming': 'Phase 2 Ben: Object Naming with Cueing Practice',
+  'phase2#phase2-ben-sentence-completion': 'Phase 2 Ben: Sentence Completion Practice',
+  'phase2#phase2-maria-object-naming': 'Phase 2 Maria: Object Naming with Cueing Practice',
+  'phase2#phase2-maria-sentence-completion': 'Phase 2 Maria: Sentence Completion Practice',
+};
+
+interface TranscriptGroup {
+  key: string;
+  label: string;
+  turns: SessionTurn[];
+}
+
 function formatDateTime(dateStr: string) {
   return new Date(dateStr).toLocaleString(undefined, {
     month: 'short', day: 'numeric', year: 'numeric',
@@ -77,6 +97,99 @@ function formatDuration(start: string, end: string | null): string {
   const m = Math.floor(sec / 60);
   if (m < 60) return `${m}m ${sec % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function normalizeIdentifier(value?: string | null) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function titleFromIdentifier(value: string) {
+  return value
+    .replace(/^phase(\d+)/, 'phase $1')
+    .split(/[-_#\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function resolveKnownTranscriptLabel(turn: SessionTurn) {
+  const candidates = [
+    normalizeIdentifier(turn.progressKey),
+    turn.phaseId && turn.taskId ? `${normalizeIdentifier(turn.phaseId)}#${normalizeIdentifier(turn.taskId)}` : '',
+    turn.phaseId && turn.sectionId ? `${normalizeIdentifier(turn.phaseId)}#${normalizeIdentifier(turn.sectionId)}` : '',
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && TRANSCRIPT_LABELS[candidate]) {
+      return TRANSCRIPT_LABELS[candidate];
+    }
+  }
+
+  return null;
+}
+
+function buildTranscriptGroupKey(turn: SessionTurn) {
+  const progressKey = normalizeIdentifier(turn.progressKey);
+  if (progressKey) return `progress:${progressKey}`;
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  if (phaseId && taskId) return `task:${phaseId}#${taskId}`;
+
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  if (phaseId && sectionId) return `section:${phaseId}#${sectionId}`;
+
+  return LEGACY_TRANSCRIPT_GROUP_KEY;
+}
+
+function buildTranscriptGroupLabel(turn: SessionTurn) {
+  const knownLabel = resolveKnownTranscriptLabel(turn);
+  if (knownLabel) return knownLabel;
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  const taskType = normalizeIdentifier(turn.taskType);
+  const patientPersonaId = normalizeIdentifier(turn.patientPersonaId);
+  const itemLabel = typeof turn.itemLabel === 'string' ? turn.itemLabel.trim() : '';
+
+  if (!phaseId && !taskId && !sectionId) {
+    return LEGACY_TRANSCRIPT_GROUP_LABEL;
+  }
+
+  const phaseLabel = phaseId ? titleFromIdentifier(phaseId) : 'Session';
+  let taskLabel = 'Conversation';
+  if (taskId || sectionId) {
+    taskLabel = titleFromIdentifier(taskId || sectionId);
+  } else if (taskType) {
+    taskLabel = titleFromIdentifier(taskType);
+  }
+
+  const personaLabel = patientPersonaId ? `${titleFromIdentifier(patientPersonaId)}: ` : '';
+  const itemSuffix = itemLabel ? ` - ${itemLabel}` : '';
+
+  return `${phaseLabel} ${personaLabel}${taskLabel}${itemSuffix}`;
+}
+
+function groupTranscriptTurns(turns: SessionTurn[]): TranscriptGroup[] {
+  const groups = new Map<string, TranscriptGroup>();
+
+  for (const turn of turns) {
+    const key = buildTranscriptGroupKey(turn);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.turns.push(turn);
+      continue;
+    }
+
+    groups.set(key, {
+      key,
+      label: buildTranscriptGroupLabel(turn),
+      turns: [turn],
+    });
+  }
+
+  return Array.from(groups.values());
 }
 
 function ConversationBubble({ turn }: { turn: SessionTurn }) {
@@ -206,6 +319,8 @@ export default function SessionDetailPage() {
   useEffect(() => {
     if (sessionId) dispatch(fetchSession(sessionId));
   }, [sessionId, dispatch]);
+
+  const transcriptGroups = useMemo(() => groupTranscriptTurns(turns), [turns]);
 
   if (loading || !session) return <LoadingSkeleton />;
 
@@ -365,9 +480,23 @@ export default function SessionDetailPage() {
             </Stack>
           </Center>
         ) : (
-          <Stack gap="md">
-            {turns.map((turn) => (
-              <ConversationBubble key={turn.turnIndex} turn={turn} />
+          <Stack gap="xl">
+            {transcriptGroups.map((group) => (
+              <Stack key={group.key} gap="md">
+                <Group justify="space-between" gap="sm">
+                  <Text size="sm" fw={600} c="var(--claude-near-black)">
+                    {group.label}
+                  </Text>
+                  <Badge variant="light" color="parchment" size="xs" radius="xl">
+                    {group.turns.length} {group.turns.length === 1 ? 'turn' : 'turns'}
+                  </Badge>
+                </Group>
+                <Stack gap="md">
+                  {group.turns.map((turn) => (
+                    <ConversationBubble key={turn.turnIndex} turn={turn} />
+                  ))}
+                </Stack>
+              </Stack>
             ))}
           </Stack>
         )}

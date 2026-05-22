@@ -20,6 +20,17 @@ export interface Session {
 export interface SessionTurn {
   sessionId: string;
   turnIndex: number;
+  assignmentId?: string;
+  phaseId?: string;
+  taskId?: string;
+  sectionId?: string;
+  taskType?: string;
+  progressKey?: string;
+  itemId?: string;
+  itemLabel?: string;
+  patientPersonaId?: string;
+  clientTurnIndex?: number;
+  cueMetadata?: Record<string, unknown>;
   userText: string;
   modelText: string;
   userSpeechStartAt?: string;
