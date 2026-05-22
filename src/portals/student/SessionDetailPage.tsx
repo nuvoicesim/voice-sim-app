@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -77,6 +77,137 @@ function formatDuration(start: string, end: string | null): string {
   const m = Math.floor(sec / 60);
   if (m < 60) return `${m}m ${sec % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+const LEGACY_TRANSCRIPT_GROUP_KEY = 'legacy';
+const LEGACY_TRANSCRIPT_GROUP_LABEL = 'Legacy / Ungrouped Conversation';
+
+// Known progressKey → human-readable label map. Keys must be lowercased to
+// match the output of normalizeIdentifier so that backend-supplied values
+// with any casing variation still hit the lookup. Eight entries cover the
+// full set of canonical Phase 1 / Phase 2 progressKeys today; the
+// titleFromIdentifier fallback handles any future progressKey that's added
+// before this map is updated.
+const TRANSCRIPT_LABELS: Record<string, string> = {
+  'phase1#phase1-section-a': 'Phase 1 Section A: Object Naming',
+  'phase1#phase1-section-b': 'Phase 1 Section B: Word Fluency',
+  'phase1#phase1-section-c': 'Phase 1 Section C: Sentence Completion',
+  'phase1#phase1-section-d': 'Phase 1 Section D: Responsive Speech',
+  'phase2#phase2-ben-object-naming': 'Phase 2 Ben: Object Naming with Cueing Practice',
+  'phase2#phase2-ben-sentence-completion': 'Phase 2 Ben: Sentence Completion Practice',
+  'phase2#phase2-maria-object-naming': 'Phase 2 Maria: Object Naming with Cueing Practice',
+  'phase2#phase2-maria-sentence-completion': 'Phase 2 Maria: Sentence Completion Practice',
+};
+
+interface TranscriptGroup {
+  key: string;
+  label: string;
+  turns: SessionTurn[];
+}
+
+function normalizeIdentifier(value?: string | null): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+// Converts kebab-case / snake_case / hash-separated identifiers into
+// readable title text, e.g. "phase2-ben-object-naming" -> "Phase 2 Ben
+// Object Naming". The leading phase<digit> token gets a space inserted so
+// it reads "Phase 1" / "Phase 2" rather than the unbroken "Phase1".
+function titleFromIdentifier(value: string): string {
+  return value
+    .replace(/^phase(\d+)/, 'phase $1')
+    .split(/[-_#\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+// Tries progressKey first (the canonical session-wide key), then
+// phaseId#taskId, then phaseId#sectionId — the same priority used by
+// buildTranscriptGroupKey. First match wins. Returns null when no known
+// entry matches so the caller can synthesize a fallback label.
+function resolveKnownTranscriptLabel(turn: SessionTurn): string | null {
+  const candidates: string[] = [];
+  const progressKey = normalizeIdentifier(turn.progressKey);
+  if (progressKey) candidates.push(progressKey);
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  if (phaseId && taskId) candidates.push(`${phaseId}#${taskId}`);
+
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  if (phaseId && sectionId) candidates.push(`${phaseId}#${sectionId}`);
+
+  for (const candidate of candidates) {
+    if (TRANSCRIPT_LABELS[candidate]) return TRANSCRIPT_LABELS[candidate];
+  }
+  return null;
+}
+
+function buildTranscriptGroupKey(turn: SessionTurn): string {
+  const progressKey = normalizeIdentifier(turn.progressKey);
+  if (progressKey) return `progress:${progressKey}`;
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  if (phaseId && taskId) return `task:${phaseId}#${taskId}`;
+
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  if (phaseId && sectionId) return `section:${phaseId}#${sectionId}`;
+
+  return LEGACY_TRANSCRIPT_GROUP_KEY;
+}
+
+function buildTranscriptGroupLabel(turn: SessionTurn): string {
+  const knownLabel = resolveKnownTranscriptLabel(turn);
+  if (knownLabel) return knownLabel;
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  const taskType = normalizeIdentifier(turn.taskType);
+  const patientPersonaId = normalizeIdentifier(turn.patientPersonaId);
+
+  // No metadata at all → fall through to the explicit legacy label so the
+  // grouping UI still reads sensibly for old sessions or for sessions
+  // recorded before the Unity payload PR ships.
+  if (!phaseId && !taskId && !sectionId) {
+    return LEGACY_TRANSCRIPT_GROUP_LABEL;
+  }
+
+  const phaseLabel = phaseId ? titleFromIdentifier(phaseId) : 'Session';
+  let taskLabel = 'Conversation';
+  if (taskId || sectionId) {
+    taskLabel = titleFromIdentifier(taskId || sectionId);
+  } else if (taskType) {
+    taskLabel = titleFromIdentifier(taskType);
+  }
+
+  const personaLabel = patientPersonaId ? `${titleFromIdentifier(patientPersonaId)}: ` : '';
+  return `${phaseLabel} ${personaLabel}${taskLabel}`;
+}
+
+// Single-pass grouping using Map insertion order so groups appear in the
+// order their first turn was recorded. The input turns[] arrives in
+// chronological order from backend handleGetSession's scanIndexForward:true
+// query, so turn-within-group order is also chronological. No sorting; no
+// shuffling.
+function groupTranscriptTurns(turns: SessionTurn[]): TranscriptGroup[] {
+  const groups = new Map<string, TranscriptGroup>();
+  for (const turn of turns) {
+    const key = buildTranscriptGroupKey(turn);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.turns.push(turn);
+      continue;
+    }
+    groups.set(key, {
+      key,
+      label: buildTranscriptGroupLabel(turn),
+      turns: [turn],
+    });
+  }
+  return Array.from(groups.values());
 }
 
 function ConversationBubble({ turn }: { turn: SessionTurn }) {
@@ -200,6 +331,11 @@ export default function SessionDetailPage() {
   const navigate = useNavigate();
   const session = useSelector(selectCurrentSession);
   const turns = useSelector(selectCurrentTurns);
+  // Group by progressKey → phaseId+taskId → phaseId+sectionId → legacy
+  // fallback. Memoized against the turns array so the grouping pass only
+  // re-runs when Redux replaces the turns list (i.e., on fetchSession
+  // resolution), not on every render.
+  const transcriptGroups = useMemo(() => groupTranscriptTurns(turns), [turns]);
   const evaluation = useSelector(selectCurrentEvaluation);
   const loading = useSelector(selectSessionsLoading);
 
@@ -365,9 +501,23 @@ export default function SessionDetailPage() {
             </Stack>
           </Center>
         ) : (
-          <Stack gap="md">
-            {turns.map((turn) => (
-              <ConversationBubble key={turn.turnIndex} turn={turn} />
+          <Stack gap="xl">
+            {transcriptGroups.map((group) => (
+              <Stack key={group.key} gap="md">
+                <Group justify="space-between" gap="sm">
+                  <Text size="sm" fw={600} c="var(--claude-near-black)">
+                    {group.label}
+                  </Text>
+                  <Badge variant="light" color="parchment" size="xs" radius="xl">
+                    {group.turns.length} {group.turns.length === 1 ? 'turn' : 'turns'}
+                  </Badge>
+                </Group>
+                <Stack gap="md">
+                  {group.turns.map((turn) => (
+                    <ConversationBubble key={turn.turnIndex} turn={turn} />
+                  ))}
+                </Stack>
+              </Stack>
             ))}
           </Stack>
         )}
