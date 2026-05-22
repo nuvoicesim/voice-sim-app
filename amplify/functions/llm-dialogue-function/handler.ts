@@ -44,10 +44,21 @@ interface DialogueRequestBody {
   metadata?: {
     sessionId?: string;
     turnIndex?: number;
+    clientTurnIndex?: number;
+    localTaskTurnIndex?: number;
     client?: string;
     userSpeechStartAt?: string;
     patientSpeechStartAt?: string;
     prewarm?: boolean;
+    phaseId?: string;
+    taskId?: string;
+    sectionId?: string;
+    taskType?: string;
+    progressKey?: string;
+    itemId?: string;
+    itemLabel?: string;
+    patientPersonaId?: string;
+    cueMetadata?: Record<string, unknown>;
   };
 }
 
@@ -69,10 +80,21 @@ interface ValidatedDialogueRequest {
   metadata: {
     sessionId?: string;
     turnIndex?: number;
+    clientTurnIndex?: number;
+    localTaskTurnIndex?: number;
     client?: string;
     userSpeechStartAt?: string;
     patientSpeechStartAt?: string;
     prewarm?: boolean;
+    phaseId?: string;
+    taskId?: string;
+    sectionId?: string;
+    taskType?: string;
+    progressKey?: string;
+    itemId?: string;
+    itemLabel?: string;
+    patientPersonaId?: string;
+    cueMetadata?: Record<string, unknown>;
   };
 }
 
@@ -220,6 +242,25 @@ function clampCode(value: unknown): number {
   return 0;
 }
 
+function asInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+function trimOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+function asMetadataObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
 function asFiniteNumber(value: unknown): number | undefined {
   if (typeof value !== "number") {
     return undefined;
@@ -311,11 +352,22 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
       },
       metadata: {
         sessionId: hasContext ? body.context!.sessionId : (typeof metadata.sessionId === "string" ? metadata.sessionId : undefined),
-        turnIndex: typeof metadata.turnIndex === "number" ? metadata.turnIndex : undefined,
+        turnIndex: asInteger(metadata.turnIndex),
+        clientTurnIndex: asInteger(metadata.clientTurnIndex),
+        localTaskTurnIndex: asInteger(metadata.localTaskTurnIndex),
         client: typeof metadata.client === "string" ? metadata.client : undefined,
         userSpeechStartAt,
         patientSpeechStartAt,
         prewarm,
+        phaseId: trimOptionalString(metadata.phaseId),
+        taskId: trimOptionalString(metadata.taskId),
+        sectionId: trimOptionalString(metadata.sectionId),
+        taskType: trimOptionalString(metadata.taskType),
+        progressKey: trimOptionalString(metadata.progressKey),
+        itemId: trimOptionalString(metadata.itemId),
+        itemLabel: trimOptionalString(metadata.itemLabel),
+        patientPersonaId: trimOptionalString(metadata.patientPersonaId),
+        cueMetadata: asMetadataObject(metadata.cueMetadata),
       },
     },
   };
@@ -603,10 +655,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   // second scene's turn 1 would overwrite the first scene's turn 1 (the
   // SessionTurn primary key is (sessionId, turnIndex)). The hint is now kept
   // for diagnostic logging only.
-  // TODO: In the research-grade transcript metadata PR, persist Unity's
-  // local task turn index separately as localTaskTurnIndex/clientTurnIndex
-  // alongside the server-authoritative global turnIndex.
-  const clientTurnIndexHint = request.metadata.turnIndex;
+  // The Unity-side hint is now persisted as SessionTurn.clientTurnIndex
+  // (research-grade per-task counter). Accept whichever name Unity sends —
+  // clientTurnIndex (explicit alias) preferred, localTaskTurnIndex next,
+  // legacy turnIndex last — so the wire format is forwards-compatible with
+  // older clients that still send only the legacy field.
+  const clientTurnIndexHint =
+    request.metadata.clientTurnIndex ??
+    request.metadata.localTaskTurnIndex ??
+    request.metadata.turnIndex;
   let resolvedTurnIndex: number | undefined =
     typeof clientTurnIndexHint === "number" ? clientTurnIndexHint : undefined;
 
@@ -654,6 +711,22 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           motionCode: parsedResponse.motionCode,
           latencyMs,
           timestamp: generateTimestamp(),
+          // Research-grade transcript metadata. Each field is spread
+          // conditionally so an undefined value never lands in DynamoDB as
+          // an attribute. Old rows without these columns remain valid;
+          // legacy clients that don't send these fields produce rows
+          // shape-identical to today's persisted rows.
+          ...(request.context.assignmentId ? { assignmentId: request.context.assignmentId } : {}),
+          ...(request.metadata.phaseId ? { phaseId: request.metadata.phaseId } : {}),
+          ...(request.metadata.taskId ? { taskId: request.metadata.taskId } : {}),
+          ...(request.metadata.sectionId ? { sectionId: request.metadata.sectionId } : {}),
+          ...(request.metadata.taskType ? { taskType: request.metadata.taskType } : {}),
+          ...(request.metadata.progressKey ? { progressKey: request.metadata.progressKey } : {}),
+          ...(request.metadata.itemId ? { itemId: request.metadata.itemId } : {}),
+          ...(request.metadata.itemLabel ? { itemLabel: request.metadata.itemLabel } : {}),
+          ...(request.metadata.patientPersonaId ? { patientPersonaId: request.metadata.patientPersonaId } : {}),
+          ...(typeof clientTurnIndexHint === "number" ? { clientTurnIndex: clientTurnIndexHint } : {}),
+          ...(request.metadata.cueMetadata ? { cueMetadata: request.metadata.cueMetadata } : {}),
         },
         dynamo
       );
