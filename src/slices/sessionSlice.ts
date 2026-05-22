@@ -28,6 +28,22 @@ export interface SessionTurn {
   patientSpeechStartAt?: string;
   patientSpeechEndAt?: string;
   patientSpeechDurationMs?: number;
+  // Optional research-grade transcript metadata persisted by Step 2 in the
+  // backend SessionTurn schema. Old rows (created before Step 2) leave
+  // these fields undefined; the SessionDetail grouping logic falls back to
+  // a single "Legacy / Ungrouped Conversation" group when no metadata is
+  // present, preserving the legacy flat-list render.
+  assignmentId?: string;
+  phaseId?: string;
+  taskId?: string;
+  sectionId?: string;
+  taskType?: string;
+  progressKey?: string;
+  itemId?: string;
+  itemLabel?: string;
+  patientPersonaId?: string;
+  clientTurnIndex?: number;
+  cueMetadata?: Record<string, unknown>;
   emotionCode: number;
   motionCode: number;
   latencyMs: number;
