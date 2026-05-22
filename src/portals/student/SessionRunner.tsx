@@ -6,14 +6,17 @@ import {
   ThemeIcon, Skeleton, Alert,
 } from '@mantine/core';
 import {
-  IconPlayerStop, IconChartBar,
+  IconArrowBack, IconChartBar, IconPlayerStop,
   IconBook2, IconClipboardCheck, IconHash, IconCircleFilled, IconAlertCircle, IconPlayerPlay,
 } from '@tabler/icons-react';
 import { fetchSession, completeSession, selectCurrentSession, selectSessionsLoading } from '../../slices/sessionSlice';
 import { selectUserId } from '../../slices/authSlice';
 import { sessionApi } from '../../api/sessionApi';
+import { assignmentApi } from '../../api/assignmentApi';
 import { apiPost } from '../../api/apiClient';
 import type { AppDispatch } from '../../store';
+
+type CourseContextStatus = 'idle' | 'resolving' | 'resolved' | 'legacy' | 'error';
 
 function resolveUnitySrc(unityLaunchUrl?: string | null) {
   if (unityLaunchUrl && /^https?:\/\//.test(unityLaunchUrl)) {
@@ -100,17 +103,37 @@ export default function SessionRunner() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const location = useLocation();
-  const routeState = location.state as { unityLaunchUrl?: string } | null;
+  // courseId / moduleItemId / assignmentId are propagated by
+  // AssignmentPlayer when launching a session from a course module item.
+  // They let us navigate the student back to the right course page on
+  // "Back to Course" and let SessionDetailPage offer the same option.
+  const routeState = location.state as {
+    unityLaunchUrl?: string;
+    courseId?: string;
+    moduleItemId?: string;
+    assignmentId?: string;
+  } | null;
   const session = useSelector(selectCurrentSession);
   const loading = useSelector(selectSessionsLoading);
   const userId = useSelector(selectUserId);
 
-  const [scoring, setScoring] = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
+  const [scoring, setScoring] = useState(false);
   const [runtimeToken, setRuntimeToken] = useState<RuntimeTokenResponse | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  // Stage 2 course-context recovery: when routeState.courseId is missing
+  // (e.g. page refresh, direct URL, deep link), look up the assignment to
+  // recover course linkage from durable backend data instead of treating
+  // the session as legacy and showing the unsafe End Session button.
+  const [courseContextStatus, setCourseContextStatus] = useState<CourseContextStatus>('idle');
+  const [resolvedCourseId, setResolvedCourseId] = useState<string | null>(null);
+  const [resolvedModuleItemId, setResolvedModuleItemId] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const prewarmedSessionRef = useRef<string | null>(null);
+  // Tracks the assignmentId we have already initiated a lookup for, so the
+  // resolution effect can't re-fire on every render. Reset implicitly when
+  // session.assignmentId changes because the effect dep array picks it up.
+  const assignmentLookupRef = useRef<string | null>(null);
   const unitySrc = useMemo(
     () => resolveUnitySrc(routeState?.unityLaunchUrl || session?.unityLaunchUrl || null),
     [routeState?.unityLaunchUrl, session?.unityLaunchUrl]
@@ -126,6 +149,127 @@ export default function SessionRunner() {
   useEffect(() => {
     if (sessionId) dispatch(fetchSession(sessionId));
   }, [sessionId, dispatch]);
+
+  // While the session is still active, periodically refetch it so the
+  // status badge reflects the authoritative backend state. Unity's
+  // task-progress chain auto-completes the session in the backend when all
+  // required keys arrive, but this page has no postMessage channel from
+  // Unity, so the badge would otherwise remain "In Progress" until the
+  // user manually navigates. Polling stops as soon as status flips to
+  // completed/abandoned (the effect re-runs with the new status and the
+  // early return clears the interval).
+  useEffect(() => {
+    if (!session?.sessionId || session.status !== 'active') return;
+    const intervalId = window.setInterval(() => {
+      dispatch(fetchSession(session.sessionId));
+    }, 6000);
+    return () => window.clearInterval(intervalId);
+  }, [session?.sessionId, session?.status, dispatch]);
+
+  // Resolve durable course context for the active-state button:
+  //   1. Fast path: routeState.courseId is set by AssignmentPlayer when
+  //      the student launches from a course module item. Use it directly,
+  //      no network call.
+  //   2. Recovery path: when routeState is missing (page refresh, direct
+  //      URL, etc.) and currentSession.assignmentId is loaded, look the
+  //      assignment up and read its courseId / moduleItemId. The same
+  //      backend fields drive course-LMS unlock (markCourseProgressCompleted)
+  //      so they are the authoritative source.
+  //   3. Confirmed-legacy: the assignment has neither courseId nor
+  //      moduleItemId — only then do we render the legacy End Session
+  //      button.
+  //   4. Error / unresolved-partial: a network error OR an assignment that
+  //      carries only moduleItemId (no courseId) is treated as
+  //      course-linked-but-unspecified; Back to Course falls back to
+  //      /student/courses rather than risking End Session.
+  useEffect(() => {
+    if (!session?.sessionId) return;
+
+    // Fast path.
+    if (routeState?.courseId) {
+      setResolvedCourseId(routeState.courseId);
+      setResolvedModuleItemId(routeState.moduleItemId ?? null);
+      setCourseContextStatus('resolved');
+      return;
+    }
+
+    const assignmentIdToLookup = session.assignmentId;
+    if (!assignmentIdToLookup) {
+      // No way to recover — extremely unlikely (session schema requires
+      // assignmentId) but defensively treat as legacy. Clear any stale
+      // resolved values from a previous session (the same component
+      // instance can be reused for a different sessionId without
+      // unmounting if React Router decides to keep it alive).
+      setResolvedCourseId(null);
+      setResolvedModuleItemId(null);
+      setCourseContextStatus('legacy');
+      return;
+    }
+
+    // Guard: never re-fetch the same assignmentId. (Already-resolved
+    // state for this assignmentId is correct and must not be cleared.)
+    if (assignmentLookupRef.current === assignmentIdToLookup) return;
+    assignmentLookupRef.current = assignmentIdToLookup;
+
+    // New assignment to look up: clear any stale resolved values from a
+    // previous session before issuing the lookup, so the "Resolving…"
+    // button and any premature read of resolvedCourseId during the
+    // network window cannot leak the previous session's context into
+    // the new session's Back to Course destination or View Results
+    // forwarded state.
+    setResolvedCourseId(null);
+    setResolvedModuleItemId(null);
+    setCourseContextStatus('resolving');
+    let cancelled = false;
+    (async () => {
+      try {
+        const assignment = await assignmentApi.get(assignmentIdToLookup);
+        if (cancelled) return;
+        const courseId = (assignment?.courseId as string | null | undefined) ?? null;
+        const moduleItemId = (assignment?.moduleItemId as string | null | undefined) ?? null;
+        if (courseId) {
+          setResolvedCourseId(courseId);
+          setResolvedModuleItemId(moduleItemId);
+          setCourseContextStatus('resolved');
+          return;
+        }
+        if (moduleItemId) {
+          // Partial linkage: assignment is wrapped by a ModuleItem but
+          // courseId wasn't back-linked onto the Assignment row. Treat as
+          // course-linked-but-unresolved; Back to Course falls back to
+          // /student/courses. FOLLOW-UP: optionally call
+          // moduleItemApi.get(moduleItemId) to recover courseId.
+          setResolvedCourseId(null);
+          setResolvedModuleItemId(moduleItemId);
+          setCourseContextStatus('resolved');
+          return;
+        }
+        // No course linkage at all — true legacy / non-course session.
+        // Clear any prior values (defensive; the lookup-start reset
+        // already nulled them, but make this branch self-consistent).
+        setResolvedCourseId(null);
+        setResolvedModuleItemId(null);
+        setCourseContextStatus('legacy');
+      } catch (err) {
+        if (cancelled) return;
+        console.warn('[SessionRunner] Failed to resolve course context from assignment:', err);
+        // On error we deliberately do NOT fall through to End Session,
+        // because that path can prematurely complete a course-linked
+        // session whose context just happened to fail lookup. Render a
+        // safe Back to Courses fallback instead. Also clear resolved
+        // values so the fallback handler navigates to the generic
+        // /student/courses list (it must NOT route to a stale recovered
+        // courseId from the previous session).
+        setResolvedCourseId(null);
+        setResolvedModuleItemId(null);
+        setCourseContextStatus('error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.sessionId, session?.assignmentId, routeState?.courseId, routeState?.moduleItemId]);
 
   useEffect(() => {
     setIframeReady(false);
@@ -273,6 +417,28 @@ export default function SessionRunner() {
     });
   }, [runtimeToken?.runtimeToken, session?.sessionId, session?.status]);
 
+  // Course-launched active-state button. Reads the effective courseId
+  // from (1) routeState (fast path), then (2) resolvedCourseId recovered
+  // via assignment lookup. Both Back to Course and the error-fallback
+  // Back to Courses route through this handler — when no courseId is
+  // available (partial linkage or error state) it gracefully falls back
+  // to the course list. Pure navigation; no PUT /sessions/{sid}/complete.
+  const handleBackToCourse = () => {
+    const courseId = routeState?.courseId ?? resolvedCourseId;
+    if (courseId) {
+      navigate(`/student/courses/${courseId}`);
+      return;
+    }
+    navigate('/student/courses');
+  };
+
+  // Legacy / non-course active-state button. Preserved for direct
+  // assignment launches confirmed to have no course context after the
+  // recovery lookup. The thunk is 409-tolerant; .unwrap() lets the local
+  // try/catch see non-409 rejections (network failure, 5xx, 403, etc.)
+  // — without .unwrap(), createAsyncThunk's dispatch resolves to a
+  // rejected action object instead of throwing, silently swallowing
+  // genuine errors.
   const handleScoreAndComplete = async () => {
     if (!session || !runtimeToken?.runtimeToken || scoring) return;
     setScoring(true);
@@ -280,7 +446,7 @@ export default function SessionRunner() {
       await dispatch(completeSession({
         sessionId: session.sessionId,
         runtimeToken: runtimeToken.runtimeToken,
-      }));
+      })).unwrap();
     } catch (err) {
       console.error('Complete session error:', err);
     } finally {
@@ -288,8 +454,19 @@ export default function SessionRunner() {
     }
   };
 
+  // Completed-state button. Forwards the best-available context so the
+  // detail page can offer its own "Back to Course" entry point with the
+  // recovered courseId even when the user reached SessionRunner without
+  // route state (refresh/direct URL).
   const handleViewResults = () => {
-    if (sessionId) navigate(`/student/session/${sessionId}/detail`);
+    if (!sessionId) return;
+    const forwardedState = {
+      unityLaunchUrl: routeState?.unityLaunchUrl,
+      courseId: routeState?.courseId ?? resolvedCourseId ?? undefined,
+      moduleItemId: routeState?.moduleItemId ?? resolvedModuleItemId ?? undefined,
+      assignmentId: routeState?.assignmentId ?? session?.assignmentId ?? undefined,
+    };
+    navigate(`/student/session/${sessionId}/detail`, { state: forwardedState });
   };
 
   if (loading || !session) return <LoadingSkeleton />;
@@ -342,20 +519,61 @@ export default function SessionRunner() {
 
           <Group gap="sm" wrap="nowrap" style={{ flexShrink: 0 }}>
             {isActive ? (
-              <Button
-                variant="filled"
-                color="terracotta"
-                size="md"
-                h={46}
-                px="xl"
-                radius="lg"
-                leftSection={<IconPlayerStop size={16} />}
-                onClick={handleScoreAndComplete}
-                loading={scoring}
-                disabled={scoring}
-              >
-                End Session
-              </Button>
+              courseContextStatus === 'resolving' || courseContextStatus === 'idle' ? (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  loading
+                  disabled
+                >
+                  Resolving…
+                </Button>
+              ) : courseContextStatus === 'resolved' ? (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  leftSection={<IconArrowBack size={16} />}
+                  onClick={handleBackToCourse}
+                >
+                  Back to Course
+                </Button>
+              ) : courseContextStatus === 'error' ? (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  leftSection={<IconArrowBack size={16} />}
+                  onClick={handleBackToCourse}
+                >
+                  Back to Courses
+                </Button>
+              ) : (
+                <Button
+                  variant="filled"
+                  color="terracotta"
+                  size="md"
+                  h={46}
+                  px="xl"
+                  radius="lg"
+                  leftSection={<IconPlayerStop size={16} />}
+                  onClick={handleScoreAndComplete}
+                  loading={scoring}
+                  disabled={scoring}
+                >
+                  End Session
+                </Button>
+              )
             ) : (
               <Button
                 variant="filled"

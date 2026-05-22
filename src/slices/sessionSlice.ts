@@ -79,7 +79,22 @@ export const fetchSession = createAsyncThunk(
 export const completeSession = createAsyncThunk(
   "sessions/complete",
   async ({ sessionId, runtimeToken }: { sessionId: string; runtimeToken: string }) => {
-    return await sessionApi.complete(sessionId, runtimeToken);
+    try {
+      return await sessionApi.complete(sessionId, runtimeToken);
+    } catch (err) {
+      // Backend returns 409 "Session is already completed" when the
+      // auto-complete chain (Unity task-progress + requiredTaskKeys) has
+      // already marked the session completed before this explicit complete
+      // call arrived. That race is the EXPECTED outcome of a clean Unity
+      // run, not a failure. Treat it as success: refetch the now-completed
+      // session so the fulfilled handler updates currentSession with the
+      // authoritative state. Any other error rethrows unchanged.
+      const message = err instanceof Error ? err.message : String(err);
+      if (/already completed/i.test(message)) {
+        return await sessionApi.get(sessionId);
+      }
+      throw err;
+    }
   }
 );
 
