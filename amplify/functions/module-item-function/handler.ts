@@ -1,5 +1,5 @@
 import type { APIGatewayProxyHandler } from "aws-lambda";
-import { ScanCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { createHash } from "crypto";
 import {
   createResponse,
@@ -512,34 +512,6 @@ async function handleRandomize(caller: any, itemId: string) {
   const accessError = await requireCourseEnrollment(caller, item.courseId, dynamo);
   if (accessError) return accessError;
 
-  // Consent gate. When payload.consentModuleItemId is set, only students whose
-  // ConsentDecision is "agreed" may be randomized. Runs BEFORE the
-  // alreadyAssigned lookup so a stale assignment from a student who later
-  // declined cannot leak back. Existing randomizer items without
-  // consentModuleItemId keep their current open behavior.
-  if (item.payload?.consentModuleItemId) {
-    const consentId = item.payload.consentModuleItemId;
-    const decision = await getItem(
-      CONSENT_DECISION_TABLE,
-      { consentItemId: consentId, studentUserId: caller.userId },
-      dynamo
-    );
-    if (!decision) {
-      return createResponse(HTTP_STATUS.FORBIDDEN, {
-        error: "Consent required",
-        reason: "You must respond to the consent form before group randomization is available.",
-        consentModuleItemId: consentId,
-      });
-    }
-    if (decision.decision !== "agreed") {
-      return createResponse(HTTP_STATUS.FORBIDDEN, {
-        error: "Consent declined",
-        reason: "Group randomization is only available to students who agreed to research participation.",
-        consentModuleItemId: consentId,
-      });
-    }
-  }
-
   const groups: Array<{ key: string; label?: string; weight?: number }> = item.payload?.groups || [];
   if (groups.length === 0) {
     return badRequestResponse("randomizer has no groups configured");
@@ -561,46 +533,19 @@ async function handleRandomize(caller: any, itemId: string) {
     return createResponse(HTTP_STATUS.OK, { assignment: existing, alreadyAssigned: true });
   }
 
-  let groupKey: string;
-  if (item.payload?.strategy === "balanced") {
-    // Balanced (least-count): count existing assignments in the same
-    // (courseId, scopeKey), restricted to currently configured group keys,
-    // then pick the under-represented group. Ties → random. With the consent
-    // gate above, only consent-agreed students contribute to the counts.
-    const result = await dynamo.send(
-      new QueryCommand({
-        TableName: GROUP_TABLE,
-        KeyConditionExpression: "courseId = :c",
-        ExpressionAttributeValues: { ":c": item.courseId },
-      })
-    );
-    const sameScope = (result.Items || []).filter(
-      (r: any) => r.scopeKey === scope
-    );
-    const configuredKeys = groups.map((g) => g.key);
-    const counts: Record<string, number> = {};
-    for (const k of configuredKeys) counts[k] = 0;
-    for (const r of sameScope) {
-      if (counts[r.groupKey] !== undefined) counts[r.groupKey] += 1;
+  // Weighted random.
+  const weights = groups.map((g) => Math.max(0, g.weight ?? 1));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let pick = Math.random() * total;
+  let chosenIndex = 0;
+  for (let i = 0; i < weights.length; i++) {
+    pick -= weights[i];
+    if (pick <= 0) {
+      chosenIndex = i;
+      break;
     }
-    const minCount = Math.min(...configuredKeys.map((k) => counts[k]));
-    const candidates = configuredKeys.filter((k) => counts[k] === minCount);
-    groupKey = candidates[Math.floor(Math.random() * candidates.length)];
-  } else {
-    // Weighted random (uniform = all weights default to 1). Existing behavior.
-    const weights = groups.map((g) => Math.max(0, g.weight ?? 1));
-    const total = weights.reduce((a, b) => a + b, 0);
-    let pick = Math.random() * total;
-    let chosenIndex = 0;
-    for (let i = 0; i < weights.length; i++) {
-      pick -= weights[i];
-      if (pick <= 0) {
-        chosenIndex = i;
-        break;
-      }
-    }
-    groupKey = groups[chosenIndex].key;
   }
+  const groupKey = groups[chosenIndex].key;
   const now = generateTimestamp();
   const row = {
     courseId: item.courseId,

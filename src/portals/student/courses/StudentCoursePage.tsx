@@ -449,14 +449,8 @@ function evaluateGating(
   myGroupKeys: string[],
   consentByItemId: Record<string, any> = {}
 ): GatingState {
-  const isConsentGated =
-    (item.itemType === "survey" || item.itemType === "randomizer") &&
-    !!item.payload?.consentModuleItemId;
-  const itemTypeLabel =
-    item.itemType === "randomizer" ? "group randomization" : "survey";
-
-  // 1. Hide-on-decline (highest priority for consent-gated items).
-  if (isConsentGated) {
+  // 1. Hide-on-decline (highest priority for survey-with-consent).
+  if (item.itemType === "survey" && item.payload?.consentModuleItemId) {
     const consentId = item.payload.consentModuleItemId as string;
     const decision = consentByItemId[consentId];
     if (
@@ -483,14 +477,14 @@ function evaluateGating(
 
   // 3. Gating passed and student isn't a declined hide. If they haven't
   //    decided yet on consent, prompt them.
-  if (isConsentGated) {
+  if (item.itemType === "survey" && item.payload?.consentModuleItemId) {
     const consentId = item.payload.consentModuleItemId as string;
     const consentItem = itemsById[consentId];
     const decision = consentByItemId[consentId];
     if (!decision) {
       return {
         locked: true,
-        reason: `You must respond to "${consentItem?.payload?.title || consentItem?.title || "the consent form"}" before this ${itemTypeLabel} is available`,
+        reason: `You must respond to "${consentItem?.payload?.title || consentItem?.title || "the consent form"}" before this survey is available`,
       };
     }
     // decision === "declined" but hideOnDecline is false → show as locked,
@@ -498,7 +492,7 @@ function evaluateGating(
     if (decision.decision === "declined") {
       return {
         locked: true,
-        reason: `You declined research participation; this ${itemTypeLabel} is optional and not for research analysis.`,
+        reason: "You declined research participation; this survey is optional and not for research analysis.",
       };
     }
   }
