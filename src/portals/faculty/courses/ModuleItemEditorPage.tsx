@@ -459,6 +459,25 @@ function MarkdownPayloadEditor({
 
 function RandomizerPayloadEditor({ payload, onChange }: { payload: any; onChange: (v: any) => void }) {
   const groups: Array<{ key: string; label?: string; weight?: number }> = payload.groups || [];
+  // Scan loaded module items for itemType=consent so faculty can require a
+  // specific Consent Form before this randomizer runs. Mirrors the picker in
+  // SurveyPayloadEditor.
+  const allItemsByModule = useSelector((s: any) => s.moduleItems.byModuleId);
+  const consentOptions: { value: string; label: string }[] = (() => {
+    const out: { value: string; label: string }[] = [];
+    for (const list of Object.values(allItemsByModule || {})) {
+      for (const it of (list as any[]) || []) {
+        if (it.itemType === "consent") {
+          out.push({
+            value: it.moduleItemId,
+            label: `${it.title}${it.payload?.version ? ` (v${it.payload.version})` : ""}`,
+          });
+        }
+      }
+    }
+    return out;
+  })();
+
   return (
     <Stack gap="xs">
       <Select
@@ -466,6 +485,7 @@ function RandomizerPayloadEditor({ payload, onChange }: { payload: any; onChange
         data={[
           { value: "uniform", label: "Uniform random" },
           { value: "weighted", label: "Weighted" },
+          { value: "balanced", label: "Balanced (least-count)" },
         ]}
         value={payload.strategy || "uniform"}
         onChange={(v) => onChange({ strategy: v })}
@@ -479,6 +499,24 @@ function RandomizerPayloadEditor({ payload, onChange }: { payload: any; onChange
         value={payload.scope || "course"}
         onChange={(v) => onChange({ scope: v })}
       />
+      <Select
+        label="Required Consent (high-priority gating)"
+        description="If set, this randomizer only runs for students who have AGREED to the chosen consent. Declined and undecided students are blocked."
+        data={consentOptions}
+        value={payload.consentModuleItemId || ""}
+        onChange={(v) => onChange({ consentModuleItemId: v || null })}
+        searchable
+        clearable
+        nothingFoundMessage="Add a Consent item somewhere in this course first"
+      />
+      {payload.consentModuleItemId && (
+        <Switch
+          label="Hide this randomizer from students who decline consent"
+          description="When ON (default), declined students don't see the randomizer at all. Turn OFF only if you want it shown as a locked, non-research note."
+          checked={payload.hideOnDecline !== false}
+          onChange={(e) => onChange({ hideOnDecline: e.currentTarget.checked })}
+        />
+      )}
       <Text size="sm" fw={500} mt="xs">
         Groups
       </Text>
