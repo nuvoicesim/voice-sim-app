@@ -4,6 +4,7 @@ import { assignmentApi } from "../api/assignmentApi";
 export interface Assignment {
   assignmentId: string;
   sceneId: string;
+  patientProfileId: string;
   title: string;
   description?: string;
   mode: "practice" | "assessment";
@@ -19,6 +20,9 @@ export interface Assignment {
   targetId: string | null;
   status: "draft" | "published" | "archived";
   createdBy: string;
+  // Set by Course-LMS migration / when assignment is wrapped by a ModuleItem.
+  courseId?: string | null;
+  moduleItemId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

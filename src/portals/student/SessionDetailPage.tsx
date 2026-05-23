@@ -1,12 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-  Title, Text, Paper, Stack, Badge, Center, Group, Box,
-  ThemeIcon, SimpleGrid, Skeleton, Button, RingProgress,
+  Text, Paper, Stack, Badge, Center, Group, Box,
+  ThemeIcon, SimpleGrid, Skeleton, Button,
 } from '@mantine/core';
 import {
-  IconFileAnalytics, IconArrowLeft, IconHash, IconBook2,
+  IconArrowLeft, IconHash, IconBook2,
   IconClipboardCheck, IconUser, IconMoodSmile, IconClock,
   IconTrophy, IconStarFilled, IconMessageCircle, IconBolt,
   IconMessages,
@@ -20,24 +20,26 @@ import {
 } from '../../slices/sessionSlice';
 import type { AppDispatch } from '../../store';
 import type { SessionTurn } from '../../slices/sessionSlice';
+import { PageHeader, SectionCard } from '../../components/design';
 
 const MODE_CONFIG: Record<string, { color: string; icon: typeof IconBook2; label: string }> = {
-  practice: { color: 'blue', icon: IconBook2, label: 'Practice' },
-  assessment: { color: 'orange', icon: IconClipboardCheck, label: 'Assessment' },
+  practice: { color: 'parchment', icon: IconBook2, label: 'Practice' },
+  assessment: { color: 'terracotta', icon: IconClipboardCheck, label: 'Assessment' },
 };
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  active: { color: 'yellow', label: 'In Progress' },
-  completed: { color: 'green', label: 'Completed' },
-  abandoned: { color: 'gray', label: 'Abandoned' },
+  active: { color: 'terracotta', label: 'In Progress' },
+  completed: { color: 'terracotta', label: 'Completed' },
+  abandoned: { color: 'parchment', label: 'Abandoned' },
 };
 
+// All performance levels collapse to terracotta (high) or parchment (low)
 const PERF_COLORS: Record<string, string> = {
-  excellent: 'teal',
-  good: 'green',
-  satisfactory: 'blue',
-  'needs improvement': 'orange',
-  poor: 'red',
+  excellent: 'terracotta',
+  good: 'terracotta',
+  satisfactory: 'parchment',
+  'needs improvement': 'parchment',
+  poor: 'parchment',
 };
 
 function formatDateTime(dateStr: string) {
@@ -45,6 +47,27 @@ function formatDateTime(dateStr: string) {
     month: 'short', day: 'numeric', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+}
+
+function formatSpeechStartTime(dateStr: string) {
+  return new Date(dateStr).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatSpeechDuration(durationMs?: number) {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) {
+    return null;
+  }
+  const totalSeconds = durationMs / 1000;
+  if (totalSeconds < 1) return `${totalSeconds.toFixed(2)}s`;
+  if (totalSeconds < 10) return `${totalSeconds.toFixed(1)}s`;
+  if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return `${minutes}m ${seconds}s`;
 }
 
 function formatDuration(start: string, end: string | null): string {
@@ -56,60 +79,214 @@ function formatDuration(start: string, end: string | null): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-function scoreToColor(score: number): string {
-  if (score >= 90) return 'teal';
-  if (score >= 75) return 'green';
-  if (score >= 60) return 'blue';
-  if (score >= 40) return 'orange';
-  return 'red';
+const LEGACY_TRANSCRIPT_GROUP_KEY = 'legacy';
+const LEGACY_TRANSCRIPT_GROUP_LABEL = 'Legacy / Ungrouped Conversation';
+
+// Known progressKey → human-readable label map. Keys must be lowercased to
+// match the output of normalizeIdentifier so that backend-supplied values
+// with any casing variation still hit the lookup. Eight entries cover the
+// full set of canonical Phase 1 / Phase 2 progressKeys today; the
+// titleFromIdentifier fallback handles any future progressKey that's added
+// before this map is updated.
+const TRANSCRIPT_LABELS: Record<string, string> = {
+  'phase1#phase1-section-a': 'Phase 1 Section A: Object Naming',
+  'phase1#phase1-section-b': 'Phase 1 Section B: Word Fluency',
+  'phase1#phase1-section-c': 'Phase 1 Section C: Sentence Completion',
+  'phase1#phase1-section-d': 'Phase 1 Section D: Responsive Speech',
+  'phase2#phase2-ben-object-naming': 'Phase 2 Ben: Object Naming with Cueing Practice',
+  'phase2#phase2-ben-sentence-completion': 'Phase 2 Ben: Sentence Completion Practice',
+  'phase2#phase2-maria-object-naming': 'Phase 2 Maria: Object Naming with Cueing Practice',
+  'phase2#phase2-maria-sentence-completion': 'Phase 2 Maria: Sentence Completion Practice',
+};
+
+interface TranscriptGroup {
+  key: string;
+  label: string;
+  turns: SessionTurn[];
+}
+
+function normalizeIdentifier(value?: string | null): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+// Converts kebab-case / snake_case / hash-separated identifiers into
+// readable title text, e.g. "phase2-ben-object-naming" -> "Phase 2 Ben
+// Object Naming". The leading phase<digit> token gets a space inserted so
+// it reads "Phase 1" / "Phase 2" rather than the unbroken "Phase1".
+function titleFromIdentifier(value: string): string {
+  return value
+    .replace(/^phase(\d+)/, 'phase $1')
+    .split(/[-_#\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+// Tries progressKey first (the canonical session-wide key), then
+// phaseId#taskId, then phaseId#sectionId — the same priority used by
+// buildTranscriptGroupKey. First match wins. Returns null when no known
+// entry matches so the caller can synthesize a fallback label.
+function resolveKnownTranscriptLabel(turn: SessionTurn): string | null {
+  const candidates: string[] = [];
+  const progressKey = normalizeIdentifier(turn.progressKey);
+  if (progressKey) candidates.push(progressKey);
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  if (phaseId && taskId) candidates.push(`${phaseId}#${taskId}`);
+
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  if (phaseId && sectionId) candidates.push(`${phaseId}#${sectionId}`);
+
+  for (const candidate of candidates) {
+    if (TRANSCRIPT_LABELS[candidate]) return TRANSCRIPT_LABELS[candidate];
+  }
+  return null;
+}
+
+function buildTranscriptGroupKey(turn: SessionTurn): string {
+  const progressKey = normalizeIdentifier(turn.progressKey);
+  if (progressKey) return `progress:${progressKey}`;
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  if (phaseId && taskId) return `task:${phaseId}#${taskId}`;
+
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  if (phaseId && sectionId) return `section:${phaseId}#${sectionId}`;
+
+  return LEGACY_TRANSCRIPT_GROUP_KEY;
+}
+
+function buildTranscriptGroupLabel(turn: SessionTurn): string {
+  const knownLabel = resolveKnownTranscriptLabel(turn);
+  if (knownLabel) return knownLabel;
+
+  const phaseId = normalizeIdentifier(turn.phaseId);
+  const taskId = normalizeIdentifier(turn.taskId);
+  const sectionId = normalizeIdentifier(turn.sectionId);
+  const taskType = normalizeIdentifier(turn.taskType);
+  const patientPersonaId = normalizeIdentifier(turn.patientPersonaId);
+
+  // No metadata at all → fall through to the explicit legacy label so the
+  // grouping UI still reads sensibly for old sessions or for sessions
+  // recorded before the Unity payload PR ships.
+  if (!phaseId && !taskId && !sectionId) {
+    return LEGACY_TRANSCRIPT_GROUP_LABEL;
+  }
+
+  const phaseLabel = phaseId ? titleFromIdentifier(phaseId) : 'Session';
+  let taskLabel = 'Conversation';
+  if (taskId || sectionId) {
+    taskLabel = titleFromIdentifier(taskId || sectionId);
+  } else if (taskType) {
+    taskLabel = titleFromIdentifier(taskType);
+  }
+
+  const personaLabel = patientPersonaId ? `${titleFromIdentifier(patientPersonaId)}: ` : '';
+  return `${phaseLabel} ${personaLabel}${taskLabel}`;
+}
+
+// Single-pass grouping using Map insertion order so groups appear in the
+// order their first turn was recorded. The input turns[] arrives in
+// chronological order from backend handleGetSession's scanIndexForward:true
+// query, so turn-within-group order is also chronological. No sorting; no
+// shuffling.
+function groupTranscriptTurns(turns: SessionTurn[]): TranscriptGroup[] {
+  const groups = new Map<string, TranscriptGroup>();
+  for (const turn of turns) {
+    const key = buildTranscriptGroupKey(turn);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.turns.push(turn);
+      continue;
+    }
+    groups.set(key, {
+      key,
+      label: buildTranscriptGroupLabel(turn),
+      turns: [turn],
+    });
+  }
+  return Array.from(groups.values());
 }
 
 function ConversationBubble({ turn }: { turn: SessionTurn }) {
+  const studentSpeechStartAt = turn.userSpeechStartAt;
+  const patientSpeechStartAt = turn.patientSpeechStartAt;
+  const studentSpeechDuration = formatSpeechDuration(turn.userSpeechDurationMs);
+  const patientSpeechDuration = formatSpeechDuration(turn.patientSpeechDurationMs);
+
   return (
     <Stack gap="sm">
-      {/* User (Therapist) */}
       {turn.userText && (
         <Group justify="flex-end" align="flex-start">
-          <Paper
-            radius="lg"
-            p="sm"
-            style={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              maxWidth: '75%',
-              borderBottomRightRadius: 4,
-            }}
-          >
-            <Text size="sm" c="white" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
-          </Paper>
-          <ThemeIcon size={34} radius="xl" variant="light" color="indigo" style={{ flexShrink: 0 }}>
+          <Stack gap={4} align="flex-end" style={{ maxWidth: '75%' }}>
+            {studentSpeechStartAt && (
+              <Group gap={4} justify="flex-end" wrap="nowrap">
+                <IconClock size={10} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">
+                  {formatSpeechStartTime(studentSpeechStartAt)}
+                </Text>
+              </Group>
+            )}
+            <Paper
+              radius="lg"
+              p="sm"
+              style={{
+                background: 'var(--claude-terracotta)',
+                borderBottomRightRadius: 4,
+              }}
+            >
+              <Text size="sm" c="var(--claude-near-black)" style={{ lineHeight: 1.6 }}>{turn.userText}</Text>
+              {studentSpeechDuration && (
+                <Group gap={4} mt={4} justify="flex-end" wrap="nowrap">
+                  <IconBolt size={10} style={{ color: 'rgba(250,249,245,0.85)' }} />
+                  <Text size="xs" style={{ color: 'rgba(250,249,245,0.85)' }}>
+                    {studentSpeechDuration}
+                  </Text>
+                </Group>
+              )}
+            </Paper>
+          </Stack>
+          <ThemeIcon size={34} radius="md" variant="light" color="terracotta" style={{ flexShrink: 0 }}>
             <IconUser size={16} />
           </ThemeIcon>
         </Group>
       )}
 
-      {/* Model (Patient) */}
       {turn.modelText && (
         <Group justify="flex-start" align="flex-start">
-          <ThemeIcon size={34} radius="xl" variant="light" color="orange" style={{ flexShrink: 0 }}>
+          <ThemeIcon size={34} radius="md" variant="light" color="parchment" style={{ flexShrink: 0 }}>
             <IconMoodSmile size={16} />
           </ThemeIcon>
-          <Paper
-            radius="lg"
-            p="sm"
-            style={{
-              background: '#f4f5f7',
-              maxWidth: '75%',
-              borderBottomLeftRadius: 4,
-            }}
-          >
-            <Text size="sm" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
-            {turn.latencyMs > 0 && (
-              <Group gap={4} mt={4}>
-                <IconBolt size={10} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">{(turn.latencyMs / 1000).toFixed(1)}s</Text>
+          <Stack gap={4} align="flex-start" style={{ maxWidth: '75%' }}>
+            {patientSpeechStartAt && (
+              <Group gap={4} wrap="nowrap">
+                <IconClock size={10} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">
+                  {formatSpeechStartTime(patientSpeechStartAt)}
+                </Text>
               </Group>
             )}
-          </Paper>
+            <Paper
+              radius="lg"
+              p="sm"
+              style={{
+                background: 'var(--claude-border-cream)',
+                borderBottomLeftRadius: 4,
+              }}
+            >
+              <Text size="sm" c="var(--claude-near-black)" style={{ lineHeight: 1.6 }}>{turn.modelText}</Text>
+              {patientSpeechDuration && (
+                <Group gap={4} mt={4} wrap="nowrap">
+                  <IconBolt size={10} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" c="var(--claude-olive)">
+                    {patientSpeechDuration}
+                  </Text>
+                </Group>
+              )}
+            </Paper>
+          </Stack>
         </Group>
       )}
     </Stack>
@@ -144,12 +321,6 @@ function LoadingSkeleton() {
           </Stack>
         </Paper>
       </SimpleGrid>
-      <Paper radius="lg" p="lg" withBorder>
-        <Skeleton height={18} width="30%" mb="lg" />
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} height={60} radius="lg" mb="sm" />
-        ))}
-      </Paper>
     </Stack>
   );
 }
@@ -160,6 +331,11 @@ export default function SessionDetailPage() {
   const navigate = useNavigate();
   const session = useSelector(selectCurrentSession);
   const turns = useSelector(selectCurrentTurns);
+  // Group by progressKey → phaseId+taskId → phaseId+sectionId → legacy
+  // fallback. Memoized against the turns array so the grouping pass only
+  // re-runs when Redux replaces the turns list (i.e., on fetchSession
+  // resolution), not on every render.
+  const transcriptGroups = useMemo(() => groupTranscriptTurns(turns), [turns]);
   const evaluation = useSelector(selectCurrentEvaluation);
   const loading = useSelector(selectSessionsLoading);
 
@@ -174,73 +350,51 @@ export default function SessionDetailPage() {
   const ModeIcon = modeConf.icon;
   const duration = formatDuration(session.startedAt, session.endedAt);
   const perfColor = evaluation
-    ? PERF_COLORS[evaluation.performanceLevel.toLowerCase()] || 'gray'
-    : 'gray';
-  const sColor = evaluation ? scoreToColor(evaluation.totalScore) : 'gray';
+    ? PERF_COLORS[evaluation.performanceLevel.toLowerCase()] || 'parchment'
+    : 'parchment';
 
   return (
     <Stack gap="xl">
-      {/* ── Page header ── */}
       <Box>
-        <Group gap="md" mb={4}>
-          <Button
-            variant="subtle" color="gray" size="xs" radius="xl" px="sm"
-            leftSection={<IconArrowLeft size={14} />}
-            onClick={() => navigate('/student/history')}
-          >
-            Back
-          </Button>
-        </Group>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
-            <IconFileAnalytics size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>Session Detail</Title>
-        </Group>
-        <Group gap="sm" ml={52}>
-          <Group gap={4}>
-            <IconHash size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-            <Text size="xs" c="dimmed">Attempt {session.attemptNo}</Text>
+        <Button
+          variant="subtle" color="parchment" size="xs" radius="xl" px="sm" mb="md"
+          leftSection={<IconArrowLeft size={14} />}
+          onClick={() => navigate('/student/history')}
+        >
+          Back
+        </Button>
+        <PageHeader title="Session Detail">
+          <Group gap="sm">
+            <Group gap={4}>
+              <IconHash size={12} style={{ color: 'var(--claude-stone)' }} />
+              <Text size="xs" c="var(--claude-olive)">Attempt {session.attemptNo}</Text>
+            </Group>
+            <Badge variant="light" color={modeConf.color} size="xs" radius="xl">
+              {modeConf.label}
+            </Badge>
+            <Badge variant="light" color={statusConf.color} size="xs" radius="xl">
+              {statusConf.label}
+            </Badge>
           </Group>
-          <Badge variant="light" color={modeConf.color} size="xs" radius="xl">
-            {modeConf.label}
-          </Badge>
-          <Badge variant="light" color={statusConf.color} size="xs" radius="xl">
-            {statusConf.label}
-          </Badge>
-        </Group>
+        </PageHeader>
       </Box>
 
-      {/* ── Evaluation + Session info ── */}
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-        {/* Score card */}
-        <Paper
-          radius="lg" p="lg" withBorder
-          style={{ border: '1px solid #edf0f5' }}
+        <SectionCard
+          title={
+            <Group gap="xs">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+                <IconTrophy size={14} />
+              </ThemeIcon>
+              <Text fw={500} size="md" c="var(--claude-near-black)">Evaluation</Text>
+            </Group>
+          }
         >
-          <Group gap="xs" mb="lg">
-            <ThemeIcon size={26} radius="xl" variant="light" color="yellow">
-              <IconTrophy size={14} />
-            </ThemeIcon>
-            <Text fw={600} size="sm">Evaluation</Text>
-          </Group>
-
           {evaluation ? (
             <Stack align="center" gap="md">
-              <RingProgress
-                size={140}
-                thickness={12}
-                roundCaps
-                sections={[{ value: evaluation.totalScore, color: `var(--mantine-color-${sColor}-6)` }]}
-                label={
-                  <Stack align="center" gap={0}>
-                    <Text fw={800} size="xl" c={`${sColor}.7`}>
-                      {evaluation.totalScore}
-                    </Text>
-                    <Text size="xs" c="dimmed">/ 100</Text>
-                  </Stack>
-                }
-              />
+              <ThemeIcon size={54} radius="lg" variant="light" color={perfColor}>
+                <IconTrophy size={26} />
+              </ThemeIcon>
               <Badge variant="light" color={perfColor} size="lg" radius="xl">
                 <Group gap={4}>
                   <IconStarFilled size={12} />
@@ -248,117 +402,126 @@ export default function SessionDetailPage() {
                 </Group>
               </Badge>
               {evaluation.overallExplanation && (
-                <Text size="sm" c="dimmed" ta="center" style={{ lineHeight: 1.6 }}>
-                  {evaluation.overallExplanation}
-                </Text>
+                <Paper
+                  radius="md"
+                  p="md"
+                  style={{
+                    width: '100%',
+                    background: 'var(--claude-parchment)',
+                    border: '1px solid var(--claude-border-cream)',
+                  }}
+                >
+                  <Text size="sm" c="var(--claude-olive)" ta="left" style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                    {evaluation.overallExplanation}
+                  </Text>
+                </Paper>
               )}
             </Stack>
           ) : (
             <Center py="xl">
               <Stack align="center" gap="xs">
-                <ThemeIcon size={44} radius="xl" variant="light" color="gray" style={{ opacity: 0.5 }}>
+                <ThemeIcon size={44} radius="lg" variant="light" color="parchment">
                   <IconTrophy size={22} />
                 </ThemeIcon>
-                <Text size="sm" c="dimmed">No evaluation available</Text>
+                <Text size="sm" c="var(--claude-stone)">No evaluation available</Text>
               </Stack>
             </Center>
           )}
-        </Paper>
+        </SectionCard>
 
-        {/* Session info card */}
-        <Paper
-          radius="lg" p="lg" withBorder
-          style={{ border: '1px solid #edf0f5' }}
+        <SectionCard
+          title={
+            <Group gap="xs">
+              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+                <ModeIcon size={14} />
+              </ThemeIcon>
+              <Text fw={500} size="md" c="var(--claude-near-black)">Session Info</Text>
+            </Group>
+          }
         >
-          <Group gap="xs" mb="lg">
-            <ThemeIcon size={26} radius="xl" variant="light" color="indigo">
-              <ModeIcon size={14} />
-            </ThemeIcon>
-            <Text fw={600} size="sm">Session Info</Text>
-          </Group>
-
           <Stack gap="sm">
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Started</Text>
-                <Text size="xs" fw={500}>{formatDateTime(session.startedAt)}</Text>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Started</Text>
+                <Text size="xs" fw={500} c="var(--claude-near-black)">{formatDateTime(session.startedAt)}</Text>
               </Group>
             </Paper>
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Ended</Text>
-                <Text size="xs" fw={500}>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Ended</Text>
+                <Text size="xs" fw={500} c="var(--claude-near-black)">
                   {session.endedAt ? formatDateTime(session.endedAt) : '—'}
                 </Text>
               </Group>
             </Paper>
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Duration</Text>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Duration</Text>
                 <Group gap={4}>
-                  <IconClock size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                  <Text size="xs" fw={500}>{duration}</Text>
+                  <IconClock size={12} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" fw={500} c="var(--claude-near-black)">{duration}</Text>
                 </Group>
               </Group>
             </Paper>
-            <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
+            <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)' }}>
               <Group justify="space-between">
-                <Text size="xs" c="dimmed" fw={500}>Conversation Turns</Text>
+                <Text size="xs" c="var(--claude-olive)" fw={500}>Conversation Turns</Text>
                 <Group gap={4}>
-                  <IconMessageCircle size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                  <Text size="xs" fw={500}>{turns.length}</Text>
+                  <IconMessageCircle size={12} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" fw={500} c="var(--claude-near-black)">{turns.length}</Text>
                 </Group>
               </Group>
             </Paper>
-            {evaluation && (
-              <Paper radius="md" p="sm" style={{ background: '#f9fafb' }}>
-                <Group justify="space-between">
-                  <Text size="xs" c="dimmed" fw={500}>Avg Response Time</Text>
-                  <Group gap={4}>
-                    <IconBolt size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                    <Text size="xs" fw={500}>{evaluation.responseTimeAvgSec.toFixed(1)}s</Text>
-                  </Group>
-                </Group>
-              </Paper>
-            )}
           </Stack>
-        </Paper>
+        </SectionCard>
       </SimpleGrid>
 
-      {/* ── Conversation history ── */}
-      <Paper
-        radius="lg" p="lg" withBorder
-        style={{ border: '1px solid #edf0f5' }}
+      <SectionCard
+        title={
+          <Group gap="xs">
+            <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
+              <IconMessages size={14} />
+            </ThemeIcon>
+            <Text fw={500} size="md" c="var(--claude-near-black)">Conversation History</Text>
+            {turns.length > 0 && (
+              <Badge variant="light" color="parchment" size="sm" radius="xl">
+                {turns.length} turns
+              </Badge>
+            )}
+          </Group>
+        }
       >
-        <Group gap="xs" mb="lg">
-          <ThemeIcon size={26} radius="xl" variant="light" color="grape">
-            <IconMessages size={14} />
-          </ThemeIcon>
-          <Text fw={600} size="sm">Conversation History</Text>
-          {turns.length > 0 && (
-            <Badge variant="light" color="gray" size="sm" radius="xl">
-              {turns.length} turns
-            </Badge>
-          )}
-        </Group>
-
         {turns.length === 0 ? (
           <Center py="xl">
             <Stack align="center" gap="xs">
-              <ThemeIcon size={44} radius="xl" variant="light" color="gray" style={{ opacity: 0.5 }}>
+              <ThemeIcon size={44} radius="lg" variant="light" color="parchment">
                 <IconMessages size={22} />
               </ThemeIcon>
-              <Text size="sm" c="dimmed">No conversation turns recorded</Text>
+              <Text size="sm" c="var(--claude-stone)">No conversation turns recorded</Text>
             </Stack>
           </Center>
         ) : (
-          <Stack gap="md">
-            {turns.map((turn) => (
-              <ConversationBubble key={turn.turnIndex} turn={turn} />
+          <Stack gap="xl">
+            {transcriptGroups.map((group) => (
+              <Stack key={group.key} gap="md">
+                <Group justify="space-between" gap="sm">
+                  <Text size="sm" fw={600} c="var(--claude-near-black)">
+                    {group.label}
+                  </Text>
+                  <Badge variant="light" color="parchment" size="xs" radius="xl">
+                    {group.turns.length} {group.turns.length === 1 ? 'turn' : 'turns'}
+                  </Badge>
+                </Group>
+                <Stack gap="md">
+                  {group.turns.map((turn) => (
+                    <ConversationBubble key={turn.turnIndex} turn={turn} />
+                  ))}
+                </Stack>
+              </Stack>
             ))}
           </Stack>
         )}
-      </Paper>
+      </SectionCard>
     </Stack>
   );
 }

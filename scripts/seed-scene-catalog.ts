@@ -1,6 +1,6 @@
 /**
  * Seed script for SceneCatalog table.
- * Maps the existing task1/task2/task3 simulation levels to scene records.
+ * Seeds reusable scene metadata and Unity build references.
  *
  * Usage (after deployment):
  *   npx tsx scripts/seed-scene-catalog.ts
@@ -11,11 +11,16 @@
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
-
 const TABLE_NAME = process.env.TABLE_NAME || process.env.SCENE_CATALOG_TABLE_NAME;
+const UNITY_BUILD_ID = process.env.UNITY_BUILD_ID;
 
 if (!TABLE_NAME) {
   console.error("Error: set TABLE_NAME or SCENE_CATALOG_TABLE_NAME env var to the SceneCatalog DynamoDB table name.");
+  process.exit(1);
+}
+
+if (!UNITY_BUILD_ID) {
+  console.error("Error: set UNITY_BUILD_ID to a published UnityBuild record id before seeding scenes.");
   process.exit(1);
 }
 
@@ -29,7 +34,7 @@ const SCENES = [
     description: "45-year-old woman, 3 months post left-sided stroke. Mild Broca's aphasia with non-fluent, effortful, telegraphic speech.",
     difficulty: "beginner",
     tags: ["aphasia", "broca", "mild", "stroke"],
-    unityBuildFolder: "broca-aphasia-webgl",
+    unityBuildId: UNITY_BUILD_ID,
     isActive: true,
   },
   {
@@ -39,7 +44,7 @@ const SCENES = [
     description: "Moderate aphasia simulation scenario for intermediate-level practice.",
     difficulty: "intermediate",
     tags: ["aphasia", "moderate"],
-    unityBuildFolder: "broca-aphasia-webgl",
+    unityBuildId: UNITY_BUILD_ID,
     isActive: true,
   },
   {
@@ -49,7 +54,7 @@ const SCENES = [
     description: "Severe aphasia simulation scenario for advanced-level practice.",
     difficulty: "advanced",
     tags: ["aphasia", "severe"],
-    unityBuildFolder: "broca-aphasia-webgl",
+    unityBuildId: UNITY_BUILD_ID,
     isActive: true,
   },
 ];

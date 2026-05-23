@@ -1,41 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  Title, Text, SimpleGrid, Paper, Stack, Box, Group,
-  ThemeIcon, Skeleton,
+  SimpleGrid, Paper, Stack, Box, Group, Skeleton,
 } from '@mantine/core';
 import {
-  IconShieldCheck, IconUsers, IconClipboardList, IconActivity,
+  IconUsers, IconClipboardList, IconActivity,
 } from '@tabler/icons-react';
 import { analyticsApi } from '../../api/analyticsApi';
-
-function StatCard({
-  label, value, subText, icon: Icon, color, bgGradient, borderColor,
-}: {
-  label: string;
-  value: string | number;
-  subText?: string;
-  icon: typeof IconUsers;
-  color: string;
-  bgGradient: string;
-  borderColor: string;
-}) {
-  return (
-    <Paper radius="lg" p="md" style={{ background: bgGradient, border: `1px solid ${borderColor}` }}>
-      <Group justify="space-between" align="center">
-        <Box>
-          <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-            {label}
-          </Text>
-          <Title order={2} c={`${color}.7`} mt={2}>{value}</Title>
-          {subText && <Text size="xs" c="dimmed" mt={2}>{subText}</Text>}
-        </Box>
-        <ThemeIcon size={42} radius="xl" variant="light" color={color}>
-          <Icon size={22} />
-        </ThemeIcon>
-      </Group>
-    </Paper>
-  );
-}
+import { PageHeader, StatCard } from '../../components/design';
 
 function LoadingSkeleton() {
   return (
@@ -70,44 +41,29 @@ export default function AdminDashboard() {
 
   return (
     <Stack gap="xl">
-      <Box>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'red', to: 'pink' }}>
-            <IconShieldCheck size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>Admin Dashboard</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          Platform-wide overview and health metrics
-        </Text>
-      </Box>
+      <PageHeader
+        title="Admin Dashboard"
+        subtitle="Platform-wide overview and health metrics"
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
         <StatCard
           label="Unique Students"
           value={data?.uniqueStudents ?? 0}
-          icon={IconUsers}
-          color="blue"
-          bgGradient="linear-gradient(135deg, #eef5ff 0%, #e0edff 100%)"
-          borderColor="#c9deff"
+          icon={<IconUsers size={22} />}
+          accent="parchment"
         />
         <StatCard
           label="Total Assignments"
           value={data?.totalAssignments ?? 0}
-          subText={`${data?.publishedAssignments ?? 0} published`}
-          icon={IconClipboardList}
-          color="violet"
-          bgGradient="linear-gradient(135deg, #f5f0ff 0%, #ede5ff 100%)"
-          borderColor="#ddd0ff"
+          hint={`${data?.publishedAssignments ?? 0} published`}
+          icon={<IconClipboardList size={22} />}
         />
         <StatCard
           label="Total Sessions"
           value={data?.totalSessions ?? 0}
-          subText={`${data?.completedSessions ?? 0} completed`}
-          icon={IconActivity}
-          color="teal"
-          bgGradient="linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%)"
-          borderColor="#c6f6d5"
+          hint={`${data?.completedSessions ?? 0} completed`}
+          icon={<IconActivity size={22} />}
         />
       </SimpleGrid>
     </Stack>

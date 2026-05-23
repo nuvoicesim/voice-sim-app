@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
-  Title, Text, Badge, Button, Stack, Group, Center, Box,
+  Title as MantineTitle, Text, Badge, Button, Stack, Group, Center, Box,
   Modal, TextInput, Textarea, Select, ActionIcon, Paper,
   ThemeIcon, Skeleton, SimpleGrid,
 } from '@mantine/core';
 import {
-  IconMovie, IconPlus, IconEdit, IconTrash, IconInbox,
+  IconMovie, IconPlus, IconEdit, IconArchive, IconInbox,
   IconTag, IconDeviceGamepad2, IconAlertTriangle,
 } from '@tabler/icons-react';
 import { sceneCatalogApi } from '../../api/sceneCatalogApi';
+import { unityBuildApi, type UnityBuild } from '../../api/unityBuildApi';
+import { PageHeader } from '../../components/design';
 
 interface Scene {
   sceneId: string;
@@ -17,7 +19,13 @@ interface Scene {
   description: string;
   difficulty: string;
   tags: string[];
+  unityBuildId?: string | null;
   unityBuildFolder: string;
+  // Optional array of canonical task progress keys (format:
+  // `${phaseId}#${taskId || sectionId}`) that must all be completed before
+  // backend auto-session-complete fires. Absent on legacy rows; UI shows a
+  // blank textarea in that case.
+  requiredTaskKeys?: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -29,20 +37,16 @@ const DIFFICULTY_OPTIONS = [
   { value: 'advanced', label: 'Advanced' },
 ];
 
-const UNITY_BUILD_OPTIONS = [
-  { value: 'broca-aphasia-webgl', label: 'Broca Aphasia (broca-aphasia-webgl)' },
-];
-
 const DIFFICULTY_COLORS: Record<string, string> = {
-  beginner: 'green',
-  intermediate: 'yellow',
-  advanced: 'red',
+  beginner: 'parchment',
+  intermediate: 'terracotta',
+  advanced: 'terracotta',
 };
 
-const DIFFICULTY_GRADIENT: Record<string, string> = {
-  beginner: 'linear-gradient(135deg, #38d9a9 0%, #20c997 100%)',
-  intermediate: 'linear-gradient(135deg, #fcc419 0%, #fab005 100%)',
-  advanced: 'linear-gradient(135deg, #ff6b6b 0%, #f03e3e 100%)',
+const DIFFICULTY_BAR: Record<string, string> = {
+  beginner: 'var(--claude-warm-silver)',
+  intermediate: 'var(--claude-coral)',
+  advanced: 'var(--claude-terracotta)',
 };
 
 const EMPTY_FORM = {
@@ -51,76 +55,99 @@ const EMPTY_FORM = {
   description: '',
   difficulty: 'intermediate',
   tags: '',
-  unityBuildFolder: 'broca-aphasia-webgl',
+  unityBuildId: '',
+  // Multiline textarea contents (one canonical task progress key per line).
+  // Parsed into string[] at submit time inside handleSave.
+  requiredTaskKeys: '',
 };
+
+// Parse the multiline textarea contents into a clean string[]:
+//   - split on any newline sequence
+//   - trim whitespace
+//   - drop blank lines
+//   - preserve entry order
+//   - deduplicate exact repeated keys (case-sensitive, order-preserving)
+function parseRequiredTaskKeysInput(raw: string): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
 
 function SceneCard({
   scene,
+  unityBuildLabel,
   onEdit,
-  onDelete,
+  onArchive,
 }: {
   scene: Scene;
+  unityBuildLabel: string;
   onEdit: (s: Scene) => void;
-  onDelete: (s: Scene) => void;
+  onArchive: (s: Scene) => void;
 }) {
-  const diffColor = DIFFICULTY_COLORS[scene.difficulty] || 'gray';
-  const diffGrad = DIFFICULTY_GRADIENT[scene.difficulty] || DIFFICULTY_GRADIENT.intermediate;
+  const diffColor = DIFFICULTY_COLORS[scene.difficulty] || 'parchment';
+  const diffBar = DIFFICULTY_BAR[scene.difficulty] || DIFFICULTY_BAR.intermediate;
   const tags = Array.isArray(scene.tags) ? scene.tags : [];
 
   return (
     <Paper
-      radius="lg" p={0} withBorder
+      radius="lg" p={0}
       style={{
         overflow: 'hidden',
-        border: '1px solid #edf0f5',
-        transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+        background: 'var(--claude-ivory)',
+        border: '1px solid var(--claude-border-cream)',
+        boxShadow: 'var(--claude-shadow-whisper)',
+        transition: 'box-shadow 0.2s ease',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '';
-        e.currentTarget.style.transform = '';
-      }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta), var(--claude-shadow-whisper)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
     >
-      <Box style={{ height: 4, background: diffGrad }} />
+      <Box style={{ height: 4, background: diffBar }} />
       <Box p="lg">
         <Group justify="space-between" align="flex-start" mb="sm">
           <Group gap="sm" align="flex-start" style={{ flex: 1, minWidth: 0 }}>
-            <ThemeIcon size={40} radius="xl" variant="light" color="violet">
+            <ThemeIcon size={40} radius="md" variant="light" color="terracotta">
               <IconMovie size={20} />
             </ThemeIcon>
             <Box style={{ flex: 1, minWidth: 0 }}>
-              <Text fw={600} size="md" lineClamp={1}>{scene.title}</Text>
-              <Badge variant="light" size="xs" radius="xl" mt={2}>{scene.scenarioKey}</Badge>
+              <Text fw={500} size="md" lineClamp={1} c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+                {scene.title}
+              </Text>
+              <Badge variant="light" color="parchment" size="xs" radius="xl" mt={2}>{scene.scenarioKey}</Badge>
             </Box>
           </Group>
           <Group gap={4} style={{ flexShrink: 0 }}>
-            <ActionIcon variant="light" color="blue" radius="xl" size="sm" onClick={() => onEdit(scene)}>
+            <ActionIcon variant="light" color="terracotta" radius="md" size="sm" onClick={() => onEdit(scene)}>
               <IconEdit size={14} />
             </ActionIcon>
-            <ActionIcon variant="light" color="red" radius="xl" size="sm" onClick={() => onDelete(scene)}>
-              <IconTrash size={14} />
+            <ActionIcon variant="light" color="parchment" radius="md" size="sm" onClick={() => onArchive(scene)}>
+              <IconArchive size={14} />
             </ActionIcon>
           </Group>
         </Group>
 
         {scene.description && (
-          <Text size="xs" c="dimmed" lineClamp={2} mb="sm" style={{ lineHeight: 1.5 }}>
+          <Text size="xs" c="var(--claude-olive)" lineClamp={2} mb="sm" style={{ lineHeight: 1.6 }}>
             {scene.description}
           </Text>
         )}
 
-        <Box p="sm" style={{ background: '#f8f9fb', borderRadius: 10 }} mb="sm">
+        <Box p="sm" style={{ background: 'var(--claude-parchment)', borderRadius: 10 }} mb="sm">
           <Group gap="lg">
             <Group gap={5}>
-              <IconDeviceGamepad2 size={13} style={{ color: 'var(--mantine-color-gray-5)' }} />
-              <Text size="xs" c="dimmed">
-                {scene.unityBuildFolder || 'No game linked'}
+              <IconDeviceGamepad2 size={13} style={{ color: 'var(--claude-stone)' }} />
+              <Text size="xs" c="var(--claude-olive)">
+                {unityBuildLabel}
               </Text>
             </Group>
-            <Badge color={diffColor} variant="filled" size="xs" radius="xl">
+            <Badge color={diffColor} variant={diffColor === 'terracotta' ? 'filled' : 'light'} size="xs" radius="xl">
               {scene.difficulty}
             </Badge>
           </Group>
@@ -128,9 +155,9 @@ function SceneCard({
 
         {tags.length > 0 && (
           <Group gap={4}>
-            <IconTag size={12} style={{ color: 'var(--mantine-color-gray-4)' }} />
+            <IconTag size={12} style={{ color: 'var(--claude-stone)' }} />
             {tags.map((tag) => (
-              <Badge key={tag} size="xs" variant="outline" radius="xl" color="gray">
+              <Badge key={tag} size="xs" variant="outline" radius="xl" color="parchment">
                 {tag}
               </Badge>
             ))}
@@ -169,22 +196,12 @@ function EmptyState() {
   return (
     <Center style={{ minHeight: 320 }}>
       <Stack align="center" gap="lg">
-        <Box
-          style={{
-            width: 88,
-            height: 88,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #f5f0ff 0%, #ede5ff 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <IconInbox size={40} style={{ color: '#9ba3c2' }} />
-        </Box>
+        <ThemeIcon size={88} radius="lg" variant="light" color="terracotta">
+          <IconInbox size={40} />
+        </ThemeIcon>
         <Box style={{ textAlign: 'center' }}>
-          <Title order={4} c="dark.4" mb={4}>No scenes yet</Title>
-          <Text c="dimmed" size="sm" maw={300} style={{ lineHeight: 1.6 }}>
+          <MantineTitle order={4} c="var(--claude-near-black)" mb={4}>No scenes yet</MantineTitle>
+          <Text c="var(--claude-olive)" size="sm" maw={300} style={{ lineHeight: 1.6 }}>
             Create your first simulation scene to get started.
           </Text>
         </Box>
@@ -195,23 +212,29 @@ function EmptyState() {
 
 export default function SceneManagement() {
   const [scenes, setScenes] = useState<Scene[]>([]);
+  const [unityBuilds, setUnityBuilds] = useState<UnityBuild[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingScene, setEditingScene] = useState<Scene | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Scene | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Scene | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
   const loadScenes = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await sceneCatalogApi.list();
+      const [sceneData, unityBuildData] = await Promise.all([
+        sceneCatalogApi.list(),
+        unityBuildApi.list(),
+      ]);
+      setUnityBuilds(unityBuildData.unityBuilds || []);
+      const data = sceneData;
       setScenes(data.scenes || []);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load scenes');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load scenes');
     } finally {
       setLoading(false);
     }
@@ -233,13 +256,20 @@ export default function SceneManagement() {
       description: scene.description || '',
       difficulty: scene.difficulty || 'intermediate',
       tags: Array.isArray(scene.tags) ? scene.tags.join(', ') : '',
-      unityBuildFolder: scene.unityBuildFolder || 'broca-aphasia-webgl',
+      unityBuildId: scene.unityBuildId || '',
+      requiredTaskKeys: Array.isArray(scene.requiredTaskKeys)
+        ? scene.requiredTaskKeys.join('\n')
+        : '',
     });
     setModalOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.scenarioKey || !form.title) return;
+    if (!form.unityBuildId) {
+      setError('Scenes must reference a published Unity build.');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -248,7 +278,12 @@ export default function SceneManagement() {
         description: form.description,
         difficulty: form.difficulty,
         tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
-        unityBuildFolder: form.unityBuildFolder,
+        unityBuildId: form.unityBuildId || null,
+        // Always include requiredTaskKeys (sending [] when blank mirrors the
+        // existing `tags` field pattern in this form). Backend
+        // loadRequiredTaskKeysForAssignment treats [] and absent the same
+        // way (auto-complete no-ops), so this is a safe default.
+        requiredTaskKeys: parseRequiredTaskKeysInput(form.requiredTaskKeys),
       };
       if (editingScene) {
         await sceneCatalogApi.update(editingScene.sceneId, payload);
@@ -257,62 +292,57 @@ export default function SceneManagement() {
       }
       setModalOpen(false);
       await loadScenes();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to save scene');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save scene');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
+    setArchiving(true);
     try {
-      await sceneCatalogApi.delete(deleteTarget.sceneId);
-      setDeleteTarget(null);
+      await sceneCatalogApi.archive(archiveTarget.sceneId);
+      setArchiveTarget(null);
       await loadScenes();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to delete scene');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive scene');
     } finally {
-      setDeleting(false);
+      setArchiving(false);
     }
   };
 
+  const unityBuildLabelById = new Map(
+    unityBuilds.map((unityBuild) => [
+      unityBuild.unityBuildId,
+      `${unityBuild.displayName} (${unityBuild.buildKey})`,
+    ])
+  );
+
   return (
     <Stack gap="xl">
-      {/* ── Header ── */}
-      <Group justify="space-between" align="flex-start">
-        <Box>
-          <Group gap="sm" mb={4}>
-            <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'grape', to: 'violet' }}>
-              <IconMovie size={20} color="white" />
-            </ThemeIcon>
-            <Title order={2} fw={700}>Scene Management</Title>
-          </Group>
-          <Text c="dimmed" size="sm" ml={52}>
-            Create and manage simulation scenes
-          </Text>
-        </Box>
-        <Button
-          radius="xl"
-          leftSection={<IconPlus size={16} />}
-          variant="gradient"
-          gradient={{ from: 'grape', to: 'violet' }}
-          onClick={openCreate}
-        >
-          New Scene
-        </Button>
-      </Group>
+      <PageHeader
+        title="Scene Management"
+        subtitle="Create and manage simulation scenes"
+        actions={
+          <Button
+            radius="lg"
+            color="terracotta"
+            leftSection={<IconPlus size={16} />}
+            onClick={openCreate}
+          >
+            New Scene
+          </Button>
+        }
+      />
 
       {/* ── Error banner ── */}
       {error && (
-        <Paper
-          radius="lg" p="sm"
-          style={{ background: '#fff5f5', border: '1px solid #fcc' }}
-        >
+        <Paper radius="md" p="sm" style={{ background: 'var(--claude-ivory)', border: '1px solid var(--claude-terracotta)' }}>
           <Group gap="xs">
-            <IconAlertTriangle size={16} style={{ color: 'var(--mantine-color-red-6)' }} />
-            <Text c="red" size="sm">{error}</Text>
+            <IconAlertTriangle size={16} style={{ color: 'var(--claude-terracotta)' }} />
+            <Text c="var(--claude-terracotta)" size="sm">{error}</Text>
           </Group>
         </Paper>
       )}
@@ -328,8 +358,12 @@ export default function SceneManagement() {
             <SceneCard
               key={s.sceneId}
               scene={s}
+              unityBuildLabel={
+                (s.unityBuildId && unityBuildLabelById.get(s.unityBuildId))
+                || 'No published Unity build'
+              }
               onEdit={openEdit}
-              onDelete={setDeleteTarget}
+              onArchive={setArchiveTarget}
             />
           ))}
         </SimpleGrid>
@@ -341,10 +375,10 @@ export default function SceneManagement() {
         onClose={() => setModalOpen(false)}
         title={
           <Group gap="xs">
-            <ThemeIcon size={24} radius="xl" variant="light" color="violet">
+            <ThemeIcon size={24} radius="md" variant="light" color="terracotta">
               <IconMovie size={13} />
             </ThemeIcon>
-            <Text fw={600}>{editingScene ? 'Edit Scene' : 'Create Scene'}</Text>
+            <Text fw={500}>{editingScene ? 'Edit Scene' : 'Create Scene'}</Text>
           </Group>
         }
         size="lg"
@@ -384,14 +418,19 @@ export default function SceneManagement() {
             radius="md"
           />
           <Select
-            label="Unity Build Folder"
-            description="Select the Unity WebGL game to bind to this scene"
-            placeholder="Select a Unity game"
-            data={UNITY_BUILD_OPTIONS}
-            value={form.unityBuildFolder}
-            onChange={(v) => setForm((prev) => ({ ...prev, unityBuildFolder: v || '' }))}
-            clearable
+            label="Unity Build"
+            description="Select the published Unity WebGL build to bind to this scene"
+            placeholder="Select a Unity build"
+            data={unityBuilds
+              .filter((unityBuild) => unityBuild.status === 'published')
+              .map((unityBuild) => ({
+                value: unityBuild.unityBuildId,
+                label: `${unityBuild.displayName} (${unityBuild.buildKey})`,
+              }))}
+            value={form.unityBuildId}
+            onChange={(value) => setForm((prev) => ({ ...prev, unityBuildId: value || '' }))}
             radius="md"
+            required
           />
           <TextInput
             label="Tags"
@@ -400,14 +439,23 @@ export default function SceneManagement() {
             onChange={(e) => setForm((prev) => ({ ...prev, tags: e.target.value }))}
             radius="md"
           />
+          <Textarea
+            label="Required Task Keys"
+            description="One key per line. The session is marked complete only after all listed task keys are completed."
+            placeholder={"phase1#phase1-section-c\nphase1#phase1-section-d"}
+            value={form.requiredTaskKeys}
+            onChange={(e) => setForm((prev) => ({ ...prev, requiredTaskKeys: e.target.value }))}
+            minRows={3}
+            autosize
+            radius="md"
+          />
           <Group justify="flex-end" mt="sm">
-            <Button variant="subtle" color="gray" radius="md" onClick={() => setModalOpen(false)}>
+            <Button variant="subtle" color="parchment" radius="md" onClick={() => setModalOpen(false)}>
               Cancel
             </Button>
             <Button
               radius="md"
-              variant="gradient"
-              gradient={{ from: 'grape', to: 'violet' }}
+              color="terracotta"
               onClick={handleSave}
               loading={saving}
             >
@@ -417,32 +465,32 @@ export default function SceneManagement() {
         </Stack>
       </Modal>
 
-      {/* ── Delete Confirmation Modal ── */}
+      {/* ── Archive Confirmation Modal ── */}
       <Modal
-        opened={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
+        opened={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
         title={
           <Group gap="xs">
-            <ThemeIcon size={24} radius="xl" variant="light" color="red">
+            <ThemeIcon size={24} radius="md" variant="light" color="terracotta">
               <IconAlertTriangle size={13} />
             </ThemeIcon>
-            <Text fw={600}>Confirm Delete</Text>
+            <Text fw={500}>Archive Scene</Text>
           </Group>
         }
         size="sm"
         radius="lg"
       >
         <Stack gap="md">
-          <Text size="sm">
-            Are you sure you want to deactivate <b>{deleteTarget?.title}</b>?
+          <Text size="sm" c="var(--claude-near-black)">
+            Are you sure you want to archive <b>{archiveTarget?.title}</b>?
             This scene will no longer appear in assignment creation.
           </Text>
           <Group justify="flex-end">
-            <Button variant="subtle" color="gray" radius="md" onClick={() => setDeleteTarget(null)}>
+            <Button variant="subtle" color="parchment" radius="md" onClick={() => setArchiveTarget(null)}>
               Cancel
             </Button>
-            <Button color="red" radius="md" onClick={handleDelete} loading={deleting}>
-              Delete
+            <Button color="terracotta" radius="md" onClick={handleArchive} loading={archiving}>
+              Archive
             </Button>
           </Group>
         </Stack>

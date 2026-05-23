@@ -9,7 +9,7 @@
 export function resolveCorsOrigin(
   requestOrigin: string | undefined,
   allowedOriginsCsv: string | undefined
-): string {
+): string | null {
   if (!allowedOriginsCsv || allowedOriginsCsv.trim() === "") {
     return "*";
   }
@@ -31,8 +31,12 @@ export function resolveCorsOrigin(
     return requestOrigin;
   }
 
-  // Return the first configured origin for non-browser calls that don't send Origin.
-  return allowedOrigins[0];
+  // Only fall back for non-browser callers that do not send an Origin header.
+  if (!requestOrigin) {
+    return allowedOrigins[0];
+  }
+
+  return null;
 }
 
 /**
@@ -43,11 +47,11 @@ export function buildCorsHeaders(
   allowedOriginsCsv: string | undefined,
   allowMethods: string = "POST,OPTIONS"
 ): Record<string, string> {
+  const allowOrigin = resolveCorsOrigin(requestOrigin, allowedOriginsCsv);
   return {
-    "Access-Control-Allow-Origin": resolveCorsOrigin(requestOrigin, allowedOriginsCsv),
-    "Access-Control-Allow-Headers": "Content-Type,X-Request-ID,x-user-id,x-user-role,x-user-email",
+    ...(allowOrigin ? { "Access-Control-Allow-Origin": allowOrigin } : {}),
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Request-ID",
     "Access-Control-Allow-Methods": allowMethods,
     "Vary": "Origin",
   };
 }
-

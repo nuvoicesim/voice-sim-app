@@ -9,14 +9,23 @@ import {
   callOpenAIChat,
   OpenAIUpstreamError,
   type OpenAIMessage,
+  requireRuntimeTokenClaims,
+  applyRuntimeClaimsToBody,
+  RuntimeTokenError,
+  resolveRuntimeConfig,
+  ContextResolutionError,
+  createDynamoDbClient,
+  putItem,
+  generateTimestamp,
+  type OpenAIUsage,
 } from "../shared";
-
-type SimulationLevel = 1 | 2 | 3;
-type Scenario = "task1" | "task2" | "task3";
+import { handlePhase1Rubric } from "./phase1-rubric";
+import { handlePhase2Evidence } from "./phase2-evidence";
 
 interface ConversationTurn {
   patient: string;
-  nurse: string;
+  nurse?: string;
+  slpStudent?: string;
 }
 
 interface RuntimeContext {
@@ -26,7 +35,6 @@ interface RuntimeContext {
 
 interface ScoringRequestBody {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   conversationTurns: ConversationTurn[];
   scenario?: string;
@@ -53,7 +61,6 @@ interface ScoringReport {
 
 interface ValidatedScoringRequest {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   conversationTurns: ConversationTurn[];
   scenario?: string;
@@ -72,6 +79,8 @@ const DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.LLM_SCORING_MAX_OUTPUT_TOKE
 const DEFAULT_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? "12000");
 const UPSTREAM_RETRIES = Number(process.env.LLM_UPSTREAM_RETRIES ?? "1");
 const MAX_INPUT_CHARS = Number(process.env.LLM_SCORING_MAX_INPUT_CHARS ?? "50000");
+const RUNTIME_TOKEN_SECRET = process.env.RUNTIME_TOKEN_SECRET ?? "";
+const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
 
 const STRICT_RETRY_INSTRUCTION = [
   "CRITICAL OUTPUT REQUIREMENTS:",
@@ -124,12 +133,17 @@ const CRITERIA_NAMES = [
   "Session Closure",
 ] as const;
 
-import { SCORING_PROMPTS } from "./promptStrings";
-import { resolveScenarioKey, ContextResolutionError, createDynamoDbClient, putItem, generateTimestamp } from "../shared";
-
 const ASSIGNMENT_TABLE_NAME = process.env.ASSIGNMENT_TABLE_NAME;
 const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
 const EVALUATION_TABLE_NAME = process.env.EVALUATION_TABLE_NAME;
+const SESSION_TABLE_NAME = process.env.SESSION_TABLE_NAME;
+// Course-LMS integration:
+const MODULE_ITEM_TABLE_NAME = process.env.MODULE_ITEM_TABLE_NAME;
+const STUDENT_ITEM_PROGRESS_TABLE_NAME = process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME;
+const REVIEWER_FEEDBACK_TABLE_NAME = process.env.REVIEWER_FEEDBACK_TABLE_NAME;
+const EVENT_LOG_TABLE_NAME = process.env.EVENT_LOG_TABLE_NAME;
+// VOICE study evidence persistence (May 18 faculty decision):
+const SESSION_EVIDENCE_TABLE_NAME = process.env.SESSION_EVIDENCE_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 function getHeaderValue(
@@ -156,12 +170,6 @@ function getRequestId(headers: Record<string, string | undefined> | undefined): 
     return requestIdHeader.trim();
   }
   return randomUUID();
-}
-
-function mapScenarioFromLevel(simulationLevel: SimulationLevel): Scenario {
-  if (simulationLevel === 1) return "task1";
-  if (simulationLevel === 2) return "task2";
-  return "task3";
 }
 
 function asInteger(value: unknown): number | null {
@@ -287,10 +295,9 @@ function validateScoringRequest(payload: unknown): { request?: ValidatedScoringR
   const hasContext = body.context && typeof body.context === "object"
     && typeof body.context.assignmentId === "string"
     && typeof body.context.sessionId === "string";
-  const hasLevel = typeof body.simulationLevel === "number" && [1, 2, 3].includes(body.simulationLevel);
 
-  if (!hasContext && !hasLevel) {
-    return { error: "Provide context.assignmentId + context.sessionId, or simulationLevel (1, 2, or 3)" };
+  if (!hasContext) {
+    return { error: "Provide context.assignmentId + context.sessionId" };
   }
 
   if (!Array.isArray(body.conversationTurns) || body.conversationTurns.length === 0) {
@@ -304,18 +311,27 @@ function validateScoringRequest(payload: unknown): { request?: ValidatedScoringR
     }
 
     const patient = (turn as Partial<ConversationTurn>).patient;
+    const slpStudent = (turn as Partial<ConversationTurn>).slpStudent;
     const nurse = (turn as Partial<ConversationTurn>).nurse;
     if (typeof patient !== "string" || patient.trim() === "") {
       return { error: "conversationTurns[].patient must be a non-empty string" };
     }
 
-    if (typeof nurse !== "string" || nurse.trim() === "") {
-      return { error: "conversationTurns[].nurse must be a non-empty string" };
+    const normalizedStudentUtterance =
+      typeof slpStudent === "string" && slpStudent.trim() !== ""
+        ? slpStudent.trim()
+        : typeof nurse === "string" && nurse.trim() !== ""
+          ? nurse.trim()
+          : null;
+
+    if (!normalizedStudentUtterance) {
+      return { error: "conversationTurns[].slpStudent must be a non-empty string" };
     }
 
     conversationTurns.push({
       patient: patient.trim(),
-      nurse: nurse.trim(),
+      nurse: normalizedStudentUtterance,
+      slpStudent: normalizedStudentUtterance,
     });
   }
 
@@ -324,7 +340,6 @@ function validateScoringRequest(payload: unknown): { request?: ValidatedScoringR
   return {
     request: {
       userID: body.userID,
-      simulationLevel: hasLevel ? body.simulationLevel : undefined,
       context: hasContext ? { assignmentId: body.context!.assignmentId, sessionId: body.context!.sessionId } : undefined,
       conversationTurns,
       scenario: typeof body.scenario === "string" ? body.scenario : undefined,
@@ -375,13 +390,25 @@ function buildScoringPrompt(conversationTurns: ConversationTurn[]): string {
       return [
         `Turn ${index + 1}:`,
         `Patient: "${turn.patient}"`,
-        `Nursing Student: "${turn.nurse}"`,
+        `SLP Student: "${turn.slpStudent || turn.nurse}"`,
         "",
       ].join("\n");
     })
     .join("\n");
 
   return `Now analyze the following full simulated conversation between the patient and a SLP student:\n\n${conversationText}`;
+}
+
+function resolveMaxOutputTokens(configuredValue: unknown): number {
+  const configuredTokens = typeof configuredValue === "number"
+    ? Math.floor(configuredValue)
+    : Number.NaN;
+
+  if (!Number.isFinite(configuredTokens) || configuredTokens <= 0) {
+    return DEFAULT_MAX_OUTPUT_TOKENS;
+  }
+
+  return Math.min(configuredTokens, DEFAULT_MAX_OUTPUT_TOKENS);
 }
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -414,13 +441,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
   }
 
-  if (!OPENAI_API_KEY) {
-    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      error: "Configuration error",
-      requestId,
-      retryable: false,
-    });
-  }
+  // OPENAI_API_KEY is verified per branch below (Phase 1 rubric and legacy
+  // narrative require it; Phase 2 evidence persistence does NOT call OpenAI
+  // and must succeed even when the key is unavailable).
 
   let payload: unknown;
   try {
@@ -432,6 +455,63 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         : "Invalid JSON format in request body";
     return respond(HTTP_STATUS.BAD_REQUEST, {
       error: message,
+      requestId,
+      retryable: false,
+    });
+  }
+
+  let runtimeClaims;
+  try {
+    runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+    payload = applyRuntimeClaimsToBody((payload as Record<string, unknown>) ?? {}, runtimeClaims);
+  } catch (error) {
+    if (error instanceof RuntimeTokenError) {
+      return respond(error.statusCode, {
+        error: error.message,
+        requestId,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+
+  // ─── VOICE study dispatch (May 18 faculty decision) ───
+  // Route Phase 1 rubric and Phase 2 evidence requests to their own branches
+  // before the legacy narrative scoring validator runs. Legacy requests (no
+  // matching taskContext discriminators) fall through to the original path
+  // unchanged. See phase1-rubric.ts and phase2-evidence.ts.
+  const taskContextForRouting = (payload as Record<string, unknown> | undefined)?.taskContext as
+    | { phaseId?: string; scoringMode?: string }
+    | undefined;
+  const phaseId = typeof taskContextForRouting?.phaseId === "string" ? taskContextForRouting.phaseId.trim().toLowerCase() : "";
+  const scoringMode = typeof taskContextForRouting?.scoringMode === "string" ? taskContextForRouting.scoringMode.trim().toLowerCase() : "";
+
+  if (phaseId === "phase1" && scoringMode === "phase1-rubric") {
+    return handlePhase1Rubric(payload, {
+      dynamo,
+      openAiApiKey: OPENAI_API_KEY,
+      requestId,
+      corsHeaders,
+      runtimeClaims,
+      sessionEvidenceTableName: SESSION_EVIDENCE_TABLE_NAME,
+    });
+  }
+  if (phaseId === "phase2") {
+    return handlePhase2Evidence(payload, {
+      dynamo,
+      requestId,
+      corsHeaders,
+      runtimeClaims,
+      sessionEvidenceTableName: SESSION_EVIDENCE_TABLE_NAME,
+    });
+  }
+  // ─── End VOICE study dispatch — fall through to legacy narrative path ───
+
+  // Legacy narrative scoring requires OpenAI; reject early if it's not
+  // configured (matches prior behavior at the top of the handler).
+  if (!OPENAI_API_KEY) {
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+      error: "Configuration error",
       requestId,
       retryable: false,
     });
@@ -449,36 +529,34 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const request = validation.request;
 
   let scenario: string;
-  let isLegacy = true;
+  let runtimeConfig;
   try {
-    const resolved = await resolveScenarioKey(
-      { context: request.context, simulationLevel: request.simulationLevel },
+    runtimeConfig = await resolveRuntimeConfig(
+      { context: request.context },
       ASSIGNMENT_TABLE_NAME || "",
       SCENE_CATALOG_TABLE_NAME || "",
+      PATIENT_PROFILE_TABLE_NAME || "",
       dynamo
     );
-    scenario = resolved.scenarioKey;
-    isLegacy = resolved.isLegacy;
+    scenario = runtimeConfig.scenarioKey;
   } catch (error) {
     if (error instanceof ContextResolutionError) {
       return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
     }
-    if (request.simulationLevel) {
-      scenario = mapScenarioFromLevel(request.simulationLevel);
-    } else {
-      return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
-    }
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
   }
 
-  const promptVersion = `${scenario}-scoring-v1`;
-  const scoringPrompt = SCORING_PROMPTS[scenario as keyof typeof SCORING_PROMPTS];
-  if (!scoringPrompt) {
+  const scoringConfig = runtimeConfig?.scoring;
+  if (!scoringConfig?.systemPrompt) {
     return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      error: "Configuration error",
+      error: "Scoring runtime config is missing for this assignment",
       requestId,
       retryable: false,
     });
   }
+  const promptVersion = scoringConfig.version || "runtime-scoring";
+  const scoringPrompt = scoringConfig.systemPrompt;
+  const maxOutputTokens = resolveMaxOutputTokens(scoringConfig.maxOutputTokens);
 
   const userPrompt = buildScoringPrompt(request.conversationTurns);
   if (userPrompt.length > MAX_INPUT_CHARS) {
@@ -502,19 +580,36 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     return callOpenAIChat({
       apiKey: OPENAI_API_KEY,
-      model: DEFAULT_MODEL,
+      model: scoringConfig?.model || DEFAULT_MODEL,
       messages,
-      temperature: DEFAULT_TEMPERATURE,
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      temperature: scoringConfig?.temperature ?? DEFAULT_TEMPERATURE,
+      maxOutputTokens,
       responseFormat: SCORING_RESPONSE_FORMAT,
       timeoutMs: DEFAULT_TIMEOUT_MS,
       upstreamRetries: UPSTREAM_RETRIES,
     });
   };
 
-  let modelResponse;
+  let modelResponse:
+    | Awaited<ReturnType<typeof callOpenAIChat>>
+    | null = null;
+  let report: ScoringReport | null = null;
+  let fallbackUsed = false;
+  let malformedRetryTriggered = false;
+  let upstreamFallbackUsed = false;
+  let fallbackReason: "provider_error" | "malformed_model_output" | null = null;
+  let upstreamFailure: { statusCode: number; retryable: boolean } | null = null;
+  let finalModel = scoringConfig?.model || DEFAULT_MODEL;
+  let finalUsage: OpenAIUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+
   try {
     modelResponse = await invokeScoringModel(false);
+    finalModel = modelResponse.model;
+    finalUsage = modelResponse.usage;
   } catch (error) {
     const upstream = error instanceof OpenAIUpstreamError
       ? mapUpstreamError(error)
@@ -527,26 +622,26 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     console.error("llm-scoring upstream error", {
       requestId,
       userID: request.userID,
-      simulationLevel: request.simulationLevel,
       promptVersion,
       scenario,
       details: error instanceof Error ? error.message : String(error),
     });
 
-    return respond(upstream.statusCode, {
-      error: upstream.message,
-      requestId,
+    upstreamFallbackUsed = true;
+    fallbackUsed = true;
+    fallbackReason = "provider_error";
+    upstreamFailure = {
+      statusCode: upstream.statusCode,
       retryable: upstream.retryable,
-    });
+    };
+    report = fallbackScoringReport();
   }
 
-  let report = parseScoringReport(modelResponse.content ?? "");
-  let fallbackUsed = false;
-  let malformedRetryTriggered = false;
-  let finalModel = modelResponse.model;
-  let finalUsage = modelResponse.usage;
+  if (modelResponse) {
+    report = parseScoringReport(modelResponse.content ?? "");
+  }
 
-  if (!report) {
+  if (modelResponse && !report) {
     malformedRetryTriggered = true;
     try {
       const strictRetryResponse = await invokeScoringModel(true);
@@ -557,7 +652,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       console.error("llm-scoring strict retry failed", {
         requestId,
         userID: request.userID,
-        simulationLevel: request.simulationLevel,
         promptVersion,
         scenario,
         details: error instanceof Error ? error.message : String(error),
@@ -567,6 +661,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   if (!report) {
     fallbackUsed = true;
+    fallbackReason = fallbackReason ?? "malformed_model_output";
     report = fallbackScoringReport();
   }
 
@@ -579,17 +674,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     latencyMs,
     createdAt: new Date().toISOString(),
     metadata: {
-      scenario,
       promptVersion,
       sessionId: request.metadata.sessionId,
       turnIndex: request.metadata.turnIndex,
       fallbackUsed,
       malformedRetryTriggered,
+      upstreamFallbackUsed,
+      fallbackReason,
+      upstreamFailure,
     },
   };
 
   // Persist evaluation to SessionEvaluation table when using context-based flow
-  if (!isLegacy && request.context?.sessionId && EVALUATION_TABLE_NAME && report) {
+  if (request.context?.sessionId && EVALUATION_TABLE_NAME && report) {
     try {
       await putItem(EVALUATION_TABLE_NAME, {
         sessionId: request.context.sessionId,
@@ -600,6 +697,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         overallExplanation: report.overallExplanation,
         createdAt: generateTimestamp(),
       }, dynamo);
+
+      // Course-LMS integration: update best-attempt cache + mirror AI feedback into ReviewerFeedback.
+      await updateCourseBestAttempt(
+        request.context.sessionId,
+        request.context.assignmentId,
+        report.totalScore,
+        report.overallExplanation
+      );
     } catch (e) {
       console.warn("Failed to persist evaluation:", e);
     }
@@ -608,19 +713,164 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   console.log("llm-scoring request completed", {
     requestId,
     userID: request.userID,
-    simulationLevel: request.simulationLevel,
     context: request.context,
     model: finalModel,
     latencyMs,
     usage: finalUsage,
     promptVersion,
     scenario,
+    maxOutputTokens,
     sessionId: request.metadata.sessionId,
     turnIndex: request.metadata.turnIndex,
     fallbackUsed,
     malformedRetryTriggered,
+    upstreamFallbackUsed,
+    fallbackReason,
   });
 
   return respond(HTTP_STATUS.OK, responseBody);
 };
 
+// ───────────── Course-LMS best-attempt + AI feedback mirror ─────────────
+
+async function updateCourseBestAttempt(
+  sessionId: string,
+  assignmentIdHint: string | undefined,
+  totalScore: number,
+  overallExplanation: string
+): Promise<void> {
+  if (
+    !ASSIGNMENT_TABLE_NAME ||
+    !MODULE_ITEM_TABLE_NAME ||
+    !STUDENT_ITEM_PROGRESS_TABLE_NAME ||
+    !REVIEWER_FEEDBACK_TABLE_NAME
+  ) {
+    return;
+  }
+  try {
+    const { GetCommand, ScanCommand } = await import("@aws-sdk/lib-dynamodb");
+
+    let assignmentId = assignmentIdHint;
+    let session: any = null;
+    if (!assignmentId && SESSION_TABLE_NAME) {
+      const sRes = await dynamo.send(
+        new GetCommand({ TableName: SESSION_TABLE_NAME, Key: { sessionId } })
+      );
+      session = sRes.Item;
+      assignmentId = session?.assignmentId;
+    } else if (SESSION_TABLE_NAME) {
+      const sRes = await dynamo.send(
+        new GetCommand({ TableName: SESSION_TABLE_NAME, Key: { sessionId } })
+      );
+      session = sRes.Item;
+    }
+    if (!assignmentId || !session?.studentUserId) return;
+    const studentUserId = session.studentUserId;
+
+    const aRes = await dynamo.send(
+      new GetCommand({ TableName: ASSIGNMENT_TABLE_NAME, Key: { assignmentId } })
+    );
+    const assignment = aRes.Item;
+    const moduleItemId = assignment?.moduleItemId;
+    const courseId = assignment?.courseId;
+    if (!moduleItemId || !courseId) return;
+
+    const miRes = await dynamo.send(
+      new GetCommand({ TableName: MODULE_ITEM_TABLE_NAME, Key: { moduleItemId } })
+    );
+    const moduleItem = miRes.Item;
+    if (!moduleItem) return;
+
+    // Read existing progress and decide whether new attempt is the new best.
+    const pRes = await dynamo.send(
+      new GetCommand({
+        TableName: STUDENT_ITEM_PROGRESS_TABLE_NAME,
+        Key: { moduleItemId, studentUserId },
+      })
+    );
+    const existing = pRes.Item;
+    const isBetter =
+      existing?.bestSessionScore == null || totalScore > existing.bestSessionScore;
+    if (!isBetter) {
+      return;
+    }
+    const now = generateTimestamp();
+    const next = {
+      moduleItemId,
+      studentUserId,
+      courseId,
+      moduleId: moduleItem.moduleId,
+      ...(existing || {}),
+      state: existing?.state || "completed",
+      bestSessionId: sessionId,
+      bestSessionScore: totalScore,
+      completedAt: existing?.completedAt || now,
+      startedAt: existing?.startedAt || session.startedAt || now,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    await putItem(STUDENT_ITEM_PROGRESS_TABLE_NAME, next, dynamo);
+
+    // Mirror AI feedback for that (moduleItemId, studentUserId): upsert single AI row.
+    const score1to7 = Math.max(1, Math.min(7, Math.round((totalScore / 24) * 7)));
+    const fbScan = await dynamo.send(
+      new ScanCommand({
+        TableName: REVIEWER_FEEDBACK_TABLE_NAME,
+        FilterExpression: "moduleItemId = :i AND studentUserId = :s AND #src = :src",
+        ExpressionAttributeNames: { "#src": "source" },
+        ExpressionAttributeValues: {
+          ":i": moduleItemId,
+          ":s": studentUserId,
+          ":src": "ai",
+        },
+      })
+    );
+    const existingAi = (fbScan.Items || [])[0];
+    if (existingAi?.locked) {
+      // Don't overwrite locked AI feedback (student has submitted ai_detection).
+      return;
+    }
+    const aiRow = {
+      feedbackId: existingAi?.feedbackId || cryptoRandomId(),
+      moduleItemId,
+      studentUserId,
+      source: "ai",
+      reviewerUserId: null,
+      displayLabel: existingAi?.displayLabel || "AI",
+      body: overallExplanation,
+      score: score1to7,
+      basedOnSessionId: sessionId,
+      revealed: existingAi?.revealed ?? false,
+      locked: false,
+      createdAt: existingAi?.createdAt || now,
+      updatedAt: now,
+    };
+    await putItem(REVIEWER_FEEDBACK_TABLE_NAME, aiRow, dynamo);
+
+    // Emit event.
+    if (EVENT_LOG_TABLE_NAME) {
+      const dateKey = now.slice(0, 10);
+      await putItem(
+        EVENT_LOG_TABLE_NAME,
+        {
+          eventId: cryptoRandomId(),
+          studentUserId,
+          studentDateKey: `${studentUserId}#${dateKey}`,
+          courseId,
+          moduleId: moduleItem.moduleId,
+          moduleItemId,
+          eventType: "best_attempt_updated",
+          payload: { sessionId, totalScore, score1to7 },
+          createdAt: now,
+        },
+        dynamo
+      );
+    }
+  } catch (e) {
+    console.warn("updateCourseBestAttempt failed", e);
+  }
+}
+
+function cryptoRandomId(): string {
+  return randomUUID();
+}

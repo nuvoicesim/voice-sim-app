@@ -1,10 +1,9 @@
-type SimulationLevel = 1 | 2 | 3;
 type Scenario = "task1" | "task2" | "task3";
 
 export interface TtsVoiceProfile {
   profileId?: string;
-  voiceId: string;
-  modelId: string;
+  voiceId?: string;
+  modelId?: string;
   stability?: number;
   similarityBoost?: number;
   styleExaggeration?: number;
@@ -18,11 +17,10 @@ export interface RuntimeContext {
 
 export interface TtsRequestBody {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   scenario?: string;
   text: string;
-  voiceProfile: TtsVoiceProfile;
+  voiceProfile?: TtsVoiceProfile;
   options?: {
     format?: string;
     includeAlignment?: boolean;
@@ -31,12 +29,12 @@ export interface TtsRequestBody {
     sessionId?: string;
     turnIndex?: number;
     client?: string;
+    prewarm?: boolean;
   };
 }
 
 export interface ValidatedTtsRequest {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   scenario: Scenario;
   text: string;
@@ -49,6 +47,7 @@ export interface ValidatedTtsRequest {
     sessionId?: string;
     turnIndex?: number;
     client?: string;
+    prewarm?: boolean;
   };
 }
 
@@ -63,12 +62,6 @@ function asFiniteNumber(value: unknown): number | undefined {
     return undefined;
   }
   return Number.isFinite(value) ? value : undefined;
-}
-
-function mapScenarioFromLevel(simulationLevel: SimulationLevel): Scenario {
-  if (simulationLevel === 1) return "task1";
-  if (simulationLevel === 2) return "task2";
-  return "task3";
 }
 
 function isInRange(value: number | undefined, min: number, max: number): boolean {
@@ -91,10 +84,9 @@ export function validateTtsRequest(
   const hasContext = body.context && typeof body.context === "object"
     && typeof body.context.assignmentId === "string"
     && typeof body.context.sessionId === "string";
-  const hasLevel = typeof body.simulationLevel === "number" && [1, 2, 3].includes(body.simulationLevel);
 
-  if (!hasContext && !hasLevel) {
-    return { error: "Provide context.assignmentId + context.sessionId, or simulationLevel (1, 2, or 3)" };
+  if (!hasContext) {
+    return { error: "Provide context.assignmentId + context.sessionId" };
   }
 
   if (typeof body.text !== "string" || body.text.trim() === "") {
@@ -106,18 +98,7 @@ export function validateTtsRequest(
     return { error: `text exceeds max length (${options.maxTextChars})` };
   }
 
-  if (!body.voiceProfile || typeof body.voiceProfile !== "object") {
-    return { error: "Missing required field: voiceProfile" };
-  }
-
-  const voiceProfileInput = body.voiceProfile as Partial<TtsVoiceProfile>;
-  if (!voiceProfileInput.voiceId || typeof voiceProfileInput.voiceId !== "string") {
-    return { error: "Missing required field: voiceProfile.voiceId" };
-  }
-
-  if (!voiceProfileInput.modelId || typeof voiceProfileInput.modelId !== "string") {
-    return { error: "Missing required field: voiceProfile.modelId" };
-  }
+  const voiceProfileInput = (body.voiceProfile || {}) as Partial<TtsVoiceProfile>;
 
   const stability = asFiniteNumber(voiceProfileInput.stability);
   if (stability !== undefined && !isInRange(stability, 0, 1)) {
@@ -144,20 +125,19 @@ export function validateTtsRequest(
   const scenario =
     typeof body.scenario === "string" && SCENARIOS.includes(body.scenario as Scenario)
       ? (body.scenario as Scenario)
-      : hasLevel ? mapScenarioFromLevel(body.simulationLevel as SimulationLevel) : "task1";
+      : "task1";
 
   return {
     request: {
       userID: body.userID,
-      simulationLevel: hasLevel ? body.simulationLevel : undefined,
       context: hasContext ? { assignmentId: body.context!.assignmentId, sessionId: body.context!.sessionId } : undefined,
       scenario,
       text,
       voiceProfile: {
         profileId:
           typeof voiceProfileInput.profileId === "string" ? voiceProfileInput.profileId : undefined,
-        voiceId: voiceProfileInput.voiceId.trim(),
-        modelId: voiceProfileInput.modelId.trim(),
+        voiceId: typeof voiceProfileInput.voiceId === "string" ? voiceProfileInput.voiceId.trim() : undefined,
+        modelId: typeof voiceProfileInput.modelId === "string" ? voiceProfileInput.modelId.trim() : undefined,
         stability,
         similarityBoost,
         styleExaggeration,
@@ -176,6 +156,8 @@ export function validateTtsRequest(
         turnIndex:
           typeof metadataInput.turnIndex === "number" ? metadataInput.turnIndex : undefined,
         client: typeof metadataInput.client === "string" ? metadataInput.client : undefined,
+        prewarm:
+          typeof metadataInput.prewarm === "boolean" ? metadataInput.prewarm : undefined,
       },
     },
   };

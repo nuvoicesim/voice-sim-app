@@ -33,8 +33,5 @@ dist-ssr
 amplify_outputs*
 amplifyconfiguration*
 
-# local-only docs (planning, sandbox notes)
-.local-docs
-
 # local test suite
-tests
+.tests

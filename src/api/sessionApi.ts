@@ -7,8 +7,15 @@ export const sessionApi = {
   get: (sessionId: string) =>
     apiGet(`/sessions/${sessionId}`),
 
-  complete: (sessionId: string) =>
-    apiPut(`/sessions/${sessionId}/complete`, {}),
+  getRuntimeToken: (sessionId: string) =>
+    apiPost(`/sessions/${sessionId}/runtime-token`, { client: "unity-webgl" }),
+
+  complete: (sessionId: string, runtimeToken: string) =>
+    apiPut(
+      `/sessions/${sessionId}/complete`,
+      {},
+      { Authorization: `Bearer ${runtimeToken}` }
+    ),
 
   listByAssignment: (assignmentId: string, params?: Record<string, string>) =>
     apiGet(`/assignments/${assignmentId}/sessions`, params),

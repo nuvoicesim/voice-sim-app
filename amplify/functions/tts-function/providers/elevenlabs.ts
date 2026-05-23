@@ -109,11 +109,16 @@ export async function synthesizeWithElevenLabs(params: SynthesizeParams): Promis
     throw new ElevenLabsUpstreamError("ElevenLabs API key is empty", 401, false);
   }
 
+  const voiceId = params.voiceProfile.voiceId?.trim();
+  if (!voiceId) {
+    throw new ElevenLabsUpstreamError("ElevenLabs voiceId is missing", 400, false);
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
 
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
-    params.voiceProfile.voiceId
+    voiceId
   )}/with-timestamps?output_format=${encodeURIComponent(params.format)}`;
 
   try {

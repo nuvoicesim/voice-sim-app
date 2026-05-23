@@ -49,17 +49,6 @@ const EvaluationResult: React.FC<{
     return sum + (Number(criterion.score) || 0);
   }, 0);
   
-
-
-  // 根据分数确定颜色
-  const getScoreColor = (score: number, maxScore: number) => {
-    const percentage = score / maxScore;
-    if (percentage >= 0.8) return 'green';
-    if (percentage >= 0.6) return 'blue';
-    if (percentage >= 0.4) return 'orange';
-    return 'red';
-  };
-
   const getOverallColor = (score: number, maxScore: number) => {
     const percentage = score / maxScore;
     if (percentage >= 0.8) return 'green';
@@ -144,9 +133,9 @@ const EvaluationResult: React.FC<{
                   color={getOverallColor(calculatedTotalScore, maxTotalScore)}
                   style={{ fontSize: '16px', padding: '12px 20px' }}
                 >
-                  {calculatedTotalScore} / {maxTotalScore}
+                  Hidden
                 </Badge>
-                <Text size="sm" c="dimmed" mt="xs">Total Score</Text>
+                <Text size="sm" c="dimmed" mt="xs">Score</Text>
               </Box>
             </Group>
           </Group>
@@ -180,18 +169,6 @@ const EvaluationResult: React.FC<{
                   <Text fw={600} size="lg" c="#2c3e50" mb="xs">
                     {criterion.name}
                   </Text>
-                  <Group gap="md">
-                    <Badge 
-                      size="md" 
-                      variant="filled" 
-                      color={getScoreColor(criterion.score, criterion.maxScore)}
-                    >
-                      Score: {criterion.score} / {criterion.maxScore}
-                    </Badge>
-                    <Text size="sm" c="dimmed">
-                      {Math.round((criterion.score / criterion.maxScore) * 100)}% achieved
-                    </Text>
-                  </Group>
                 </Box>
               </Group>
               

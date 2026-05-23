@@ -9,10 +9,17 @@ import {
   callOpenAIChat,
   OpenAIUpstreamError,
   type OpenAIMessage,
+  requireRuntimeTokenClaims,
+  applyRuntimeClaimsToBody,
+  RuntimeTokenError,
+  putItem,
+  generateTimestamp,
+  queryItems,
+  resolveRuntimeConfig,
+  ContextResolutionError,
+  createDynamoDbClient,
 } from "../shared";
 
-type SimulationLevel = 1 | 2 | 3;
-type Scenario = "task1" | "task2" | "task3";
 type DialogueRole = "system" | "user" | "assistant";
 
 interface DialogueMessage {
@@ -27,7 +34,6 @@ interface RuntimeContext {
 
 interface DialogueRequestBody {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   messages: DialogueMessage[];
   scenario?: string;
@@ -38,7 +44,21 @@ interface DialogueRequestBody {
   metadata?: {
     sessionId?: string;
     turnIndex?: number;
+    clientTurnIndex?: number;
+    localTaskTurnIndex?: number;
     client?: string;
+    userSpeechStartAt?: string;
+    patientSpeechStartAt?: string;
+    prewarm?: boolean;
+    phaseId?: string;
+    taskId?: string;
+    sectionId?: string;
+    taskType?: string;
+    progressKey?: string;
+    itemId?: string;
+    itemLabel?: string;
+    patientPersonaId?: string;
+    cueMetadata?: Record<string, unknown>;
   };
 }
 
@@ -50,7 +70,6 @@ interface StructuredDialogueResponse {
 
 interface ValidatedDialogueRequest {
   userID: string;
-  simulationLevel?: SimulationLevel;
   context?: RuntimeContext;
   messages: DialogueMessage[];
   scenario?: string;
@@ -61,7 +80,21 @@ interface ValidatedDialogueRequest {
   metadata: {
     sessionId?: string;
     turnIndex?: number;
+    clientTurnIndex?: number;
+    localTaskTurnIndex?: number;
     client?: string;
+    userSpeechStartAt?: string;
+    patientSpeechStartAt?: string;
+    prewarm?: boolean;
+    phaseId?: string;
+    taskId?: string;
+    sectionId?: string;
+    taskType?: string;
+    progressKey?: string;
+    itemId?: string;
+    itemLabel?: string;
+    patientPersonaId?: string;
+    cueMetadata?: Record<string, unknown>;
   };
 }
 
@@ -74,6 +107,9 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? "12000");
 const UPSTREAM_RETRIES = Number(process.env.LLM_UPSTREAM_RETRIES ?? "1");
 const MAX_HISTORY_MESSAGES = Number(process.env.LLM_DIALOGUE_MAX_HISTORY ?? "20");
 const MAX_INPUT_CHARS = Number(process.env.LLM_MAX_INPUT_CHARS ?? "12000");
+const TURN_TABLE_NAME = process.env.TURN_TABLE_NAME;
+const RUNTIME_TOKEN_SECRET = process.env.RUNTIME_TOKEN_SECRET ?? "";
+const PATIENT_PROFILE_TABLE_NAME = process.env.PATIENT_PROFILE_TABLE_NAME;
 
 const SAFE_FALLBACK_RESPONSE: StructuredDialogueResponse = {
   responseText: "I.. I don't k-know...",
@@ -136,9 +172,6 @@ const DIALOGUE_RESPONSE_FORMAT: Record<string, unknown> = {
   },
 };
 
-import { DIALOGUE_PROMPTS } from "./promptStrings";
-import { resolveScenarioKey, ContextResolutionError, createDynamoDbClient } from "../shared";
-
 const ASSIGNMENT_TABLE_NAME = process.env.ASSIGNMENT_TABLE_NAME;
 const SCENE_CATALOG_TABLE_NAME = process.env.SCENE_CATALOG_TABLE_NAME;
 const dynamo = createDynamoDbClient();
@@ -167,12 +200,6 @@ function getRequestId(headers: Record<string, string | undefined> | undefined): 
     return requestIdHeader.trim();
   }
   return randomUUID();
-}
-
-function mapScenarioFromLevel(simulationLevel: SimulationLevel): Scenario {
-  if (simulationLevel === 1) return "task1";
-  if (simulationLevel === 2) return "task2";
-  return "task3";
 }
 
 function parseStructuredDialogue(content: string): StructuredDialogueResponse | null {
@@ -215,12 +242,44 @@ function clampCode(value: unknown): number {
   return 0;
 }
 
+function asInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+function trimOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+function asMetadataObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
 function asFiniteNumber(value: unknown): number | undefined {
   if (typeof value !== "number") {
     return undefined;
   }
 
   return Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeOptionalTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed.toISOString();
 }
 
 function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogueRequest; error?: string } {
@@ -236,10 +295,9 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
   const hasContext = body.context && typeof body.context === "object"
     && typeof body.context.assignmentId === "string"
     && typeof body.context.sessionId === "string";
-  const hasLevel = typeof body.simulationLevel === "number" && [1, 2, 3].includes(body.simulationLevel);
 
-  if (!hasContext && !hasLevel) {
-    return { error: "Provide context.assignmentId + context.sessionId, or simulationLevel (1, 2, or 3)" };
+  if (!hasContext) {
+    return { error: "Provide context.assignmentId + context.sessionId" };
   }
 
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
@@ -270,11 +328,21 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
 
   const options = body.options && typeof body.options === "object" ? body.options : {};
   const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  const userSpeechStartAt = normalizeOptionalTimestamp(metadata.userSpeechStartAt);
+  const patientSpeechStartAt = normalizeOptionalTimestamp(metadata.patientSpeechStartAt);
+  const prewarm = typeof metadata.prewarm === "boolean" ? metadata.prewarm : undefined;
+
+  if ("userSpeechStartAt" in metadata && !userSpeechStartAt) {
+    return { error: "metadata.userSpeechStartAt must be a valid ISO timestamp" };
+  }
+
+  if ("patientSpeechStartAt" in metadata && !patientSpeechStartAt) {
+    return { error: "metadata.patientSpeechStartAt must be a valid ISO timestamp" };
+  }
 
   return {
     request: {
       userID: body.userID,
-      simulationLevel: hasLevel ? body.simulationLevel : undefined,
       context: hasContext ? { assignmentId: body.context!.assignmentId, sessionId: body.context!.sessionId } : undefined,
       messages: validatedMessages,
       scenario: typeof body.scenario === "string" ? body.scenario : undefined,
@@ -284,8 +352,22 @@ function validateDialogueRequest(payload: unknown): { request?: ValidatedDialogu
       },
       metadata: {
         sessionId: hasContext ? body.context!.sessionId : (typeof metadata.sessionId === "string" ? metadata.sessionId : undefined),
-        turnIndex: typeof metadata.turnIndex === "number" ? metadata.turnIndex : undefined,
+        turnIndex: asInteger(metadata.turnIndex),
+        clientTurnIndex: asInteger(metadata.clientTurnIndex),
+        localTaskTurnIndex: asInteger(metadata.localTaskTurnIndex),
         client: typeof metadata.client === "string" ? metadata.client : undefined,
+        userSpeechStartAt,
+        patientSpeechStartAt,
+        prewarm,
+        phaseId: trimOptionalString(metadata.phaseId),
+        taskId: trimOptionalString(metadata.taskId),
+        sectionId: trimOptionalString(metadata.sectionId),
+        taskType: trimOptionalString(metadata.taskType),
+        progressKey: trimOptionalString(metadata.progressKey),
+        itemId: trimOptionalString(metadata.itemId),
+        itemLabel: trimOptionalString(metadata.itemLabel),
+        patientPersonaId: trimOptionalString(metadata.patientPersonaId),
+        cueMetadata: asMetadataObject(metadata.cueMetadata),
       },
     },
   };
@@ -336,6 +418,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const requestOrigin = getHeaderValue(event.headers ?? undefined, "origin");
   const corsHeaders = buildCorsHeaders(requestOrigin, ALLOWED_ORIGINS, "GET,POST,OPTIONS");
   const requestId = getRequestId(event.headers ?? undefined);
+  const requestStartedAt = Date.now();
 
   const respond = (
     statusCode: number,
@@ -385,6 +468,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  try {
+    const runtimeClaims = requireRuntimeTokenClaims(event.headers ?? undefined, RUNTIME_TOKEN_SECRET);
+    payload = applyRuntimeClaimsToBody((payload as Record<string, unknown>) ?? {}, runtimeClaims);
+  } catch (error) {
+    if (error instanceof RuntimeTokenError) {
+      return respond(error.statusCode, {
+        error: error.message,
+        requestId,
+        retryable: false,
+      });
+    }
+    throw error;
+  }
+
   const validation = validateDialogueRequest(payload);
   if (!validation.request) {
     return respond(HTTP_STATUS.BAD_REQUEST, {
@@ -395,39 +492,39 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   const request = validation.request;
+  const isPrewarm = request.metadata.prewarm === true;
 
   let scenario: string;
-  let isLegacy = true;
+  let runtimeConfig;
+  let runtimeConfigMs = 0;
   try {
-    const resolved = await resolveScenarioKey(
-      { context: request.context, simulationLevel: request.simulationLevel },
+    const runtimeConfigStartedAt = Date.now();
+    runtimeConfig = await resolveRuntimeConfig(
+      { context: request.context },
       ASSIGNMENT_TABLE_NAME || "",
       SCENE_CATALOG_TABLE_NAME || "",
+      PATIENT_PROFILE_TABLE_NAME || "",
       dynamo
     );
-    scenario = resolved.scenarioKey;
-    isLegacy = resolved.isLegacy;
+    runtimeConfigMs = Date.now() - runtimeConfigStartedAt;
+    scenario = runtimeConfig.scenarioKey;
   } catch (error) {
     if (error instanceof ContextResolutionError) {
       return respond(HTTP_STATUS.BAD_REQUEST, { error: error.message, requestId, retryable: false });
     }
-    // Fallback for missing table config
-    if (request.simulationLevel) {
-      scenario = mapScenarioFromLevel(request.simulationLevel);
-    } else {
-      return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
-    }
+    return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, { error: "Context resolution failed", requestId, retryable: false });
   }
 
-  const promptVersion = `${scenario}-dialogue-v1`;
-  const basePrompt = DIALOGUE_PROMPTS[scenario as keyof typeof DIALOGUE_PROMPTS];
-  if (!basePrompt) {
+  const dialogueConfig = runtimeConfig?.dialogue;
+  if (!dialogueConfig?.systemPrompt) {
     return respond(HTTP_STATUS.INTERNAL_SERVER_ERROR, {
-      error: "Configuration error",
+      error: "Dialogue runtime config is missing for this assignment",
       requestId,
       retryable: false,
     });
   }
+  const promptVersion = dialogueConfig.version || "runtime-dialogue";
+  const basePrompt = dialogueConfig.systemPrompt;
 
   const historyMessages = request.messages
     .filter((message) => message.role === "user" || message.role === "assistant")
@@ -442,6 +539,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
+  const lastUserMessage = [...historyMessages].reverse().find((message) => message.role === "user");
+
   const totalInputChars = historyMessages.reduce(
     (sum, message) => sum + message.content.length,
     0
@@ -454,11 +553,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     });
   }
 
-  const temperature = request.options.temperature ?? DEFAULT_TEMPERATURE;
+  const temperature =
+    request.options.temperature
+    ?? dialogueConfig?.temperature
+    ?? DEFAULT_TEMPERATURE;
   const maxOutputTokens = Math.floor(
-    request.options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+    request.options.maxOutputTokens
+    ?? dialogueConfig?.maxOutputTokens
+    ?? DEFAULT_MAX_OUTPUT_TOKENS
   );
   const systemPrompt = buildSystemPrompt(basePrompt);
+  const modelName = dialogueConfig?.model || DEFAULT_MODEL;
   const startedAt = Date.now();
 
   const invokeDialogueModel = async (strictMode: boolean) => {
@@ -470,7 +575,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     return callOpenAIChat({
       apiKey: OPENAI_API_KEY,
-      model: DEFAULT_MODEL,
+      model: modelName,
       messages,
       temperature,
       maxOutputTokens,
@@ -495,10 +600,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     console.error("llm-dialogue upstream error", {
       requestId,
       userID: request.userID,
-      simulationLevel: request.simulationLevel,
       scenario,
       promptVersion,
+      prewarm: isPrewarm,
       details: error instanceof Error ? error.message : String(error),
+      runtimeConfigMs,
+      totalRequestMs: Date.now() - requestStartedAt,
     });
 
     return respond(upstream.statusCode, {
@@ -525,10 +632,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       console.error("llm-dialogue strict retry failed", {
         requestId,
         userID: request.userID,
-        simulationLevel: request.simulationLevel,
         scenario,
         promptVersion,
+        prewarm: isPrewarm,
         details: error instanceof Error ? error.message : String(error),
+        runtimeConfigMs,
+        totalRequestMs: Date.now() - requestStartedAt,
       });
     }
   }
@@ -539,6 +648,93 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   const latencyMs = Date.now() - startedAt;
+  // request.metadata.turnIndex is Unity's CLIENT-LOCAL counter, which resets
+  // to 0 inside each task/section scene's OpenAIRequest MonoBehaviour.
+  // Multiple scenes in one SimulationSession share the same sessionId, so if
+  // we honored the client hint as the persisted SessionTurn.turnIndex, the
+  // second scene's turn 1 would overwrite the first scene's turn 1 (the
+  // SessionTurn primary key is (sessionId, turnIndex)). The hint is now kept
+  // for diagnostic logging only.
+  // The Unity-side hint is now persisted as SessionTurn.clientTurnIndex
+  // (research-grade per-task counter). Accept whichever name Unity sends —
+  // clientTurnIndex (explicit alias) preferred, localTaskTurnIndex next,
+  // legacy turnIndex last — so the wire format is forwards-compatible with
+  // older clients that still send only the legacy field.
+  const clientTurnIndexHint =
+    request.metadata.clientTurnIndex ??
+    request.metadata.localTaskTurnIndex ??
+    request.metadata.turnIndex;
+  let resolvedTurnIndex: number | undefined =
+    typeof clientTurnIndexHint === "number" ? clientTurnIndexHint : undefined;
+
+  if (!isPrewarm && request.context?.sessionId && TURN_TABLE_NAME && lastUserMessage) {
+    try {
+      // Always compute the next turnIndex server-side from the authoritative
+      // (sessionId, turnIndex) DESC primary-key view. Generalizes the prior
+      // fallback path that only ran when the client omitted the hint.
+      //
+      // Race safety: the voice-driven student UX is strictly sequential
+      // (student speaks → patient responds → student speaks again) so two
+      // concurrent /llm-dialogue requests for the same session are not
+      // expected. If concurrent requests ever become possible (e.g., multi-
+      // device or background pre-generation), upgrade this to a conditional
+      // PutItem with retry, or a dedicated atomic counter — out of scope
+      // for this PR.
+      const existingTurns = await queryItems(
+        TURN_TABLE_NAME,
+        "sessionId = :sid",
+        { ":sid": request.context.sessionId },
+        dynamo,
+        { scanIndexForward: false, limit: 1 }
+      );
+      const lastTurnIndex = existingTurns[0]?.turnIndex
+        ? Number(existingTurns[0].turnIndex)
+        : 0;
+      resolvedTurnIndex = lastTurnIndex + 1;
+
+      console.log("[llm-dialogue] allocated globalTurnIndex", {
+        sessionId: request.context.sessionId,
+        globalTurnIndex: resolvedTurnIndex,
+        clientTurnIndexHint,
+      });
+
+      await putItem(
+        TURN_TABLE_NAME,
+        {
+          sessionId: request.context.sessionId,
+          turnIndex: resolvedTurnIndex,
+          userText: lastUserMessage.content,
+          modelText: parsedResponse.responseText,
+          ...(request.metadata.userSpeechStartAt ? { userSpeechStartAt: request.metadata.userSpeechStartAt } : {}),
+          ...(request.metadata.patientSpeechStartAt ? { patientSpeechStartAt: request.metadata.patientSpeechStartAt } : {}),
+          emotionCode: parsedResponse.emotionCode,
+          motionCode: parsedResponse.motionCode,
+          latencyMs,
+          timestamp: generateTimestamp(),
+          // Research-grade transcript metadata. Each field is spread
+          // conditionally so an undefined value never lands in DynamoDB as
+          // an attribute. Old rows without these columns remain valid;
+          // legacy clients that don't send these fields produce rows
+          // shape-identical to today's persisted rows.
+          ...(request.context.assignmentId ? { assignmentId: request.context.assignmentId } : {}),
+          ...(request.metadata.phaseId ? { phaseId: request.metadata.phaseId } : {}),
+          ...(request.metadata.taskId ? { taskId: request.metadata.taskId } : {}),
+          ...(request.metadata.sectionId ? { sectionId: request.metadata.sectionId } : {}),
+          ...(request.metadata.taskType ? { taskType: request.metadata.taskType } : {}),
+          ...(request.metadata.progressKey ? { progressKey: request.metadata.progressKey } : {}),
+          ...(request.metadata.itemId ? { itemId: request.metadata.itemId } : {}),
+          ...(request.metadata.itemLabel ? { itemLabel: request.metadata.itemLabel } : {}),
+          ...(request.metadata.patientPersonaId ? { patientPersonaId: request.metadata.patientPersonaId } : {}),
+          ...(typeof clientTurnIndexHint === "number" ? { clientTurnIndex: clientTurnIndexHint } : {}),
+          ...(request.metadata.cueMetadata ? { cueMetadata: request.metadata.cueMetadata } : {}),
+        },
+        dynamo
+      );
+    } catch (error) {
+      console.warn("Failed to persist dialogue turn:", error);
+    }
+  }
+
   const responseBody = {
     requestId,
     choices: [
@@ -554,10 +750,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     latencyMs,
     createdAt: new Date().toISOString(),
     metadata: {
-      scenario,
       promptVersion,
       sessionId: request.metadata.sessionId,
-      turnIndex: request.metadata.turnIndex,
+      turnIndex: resolvedTurnIndex,
+      prewarm: isPrewarm,
       fallbackUsed,
       malformedRetryTriggered,
     },
@@ -566,14 +762,16 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   console.log("llm-dialogue request completed", {
     requestId,
     userID: request.userID,
-    simulationLevel: request.simulationLevel,
     model: finalModel,
+    prewarm: isPrewarm,
+    runtimeConfigMs,
     latencyMs,
+    totalRequestMs: Date.now() - requestStartedAt,
     usage: finalUsage,
     promptVersion,
     scenario,
     sessionId: request.metadata.sessionId,
-    turnIndex: request.metadata.turnIndex,
+    turnIndex: resolvedTurnIndex,
     fallbackUsed,
     malformedRetryTriggered,
   });

@@ -6,12 +6,15 @@ import { Authenticator } from '@aws-amplify/ui-react'
 import '@aws-amplify/ui-react/styles.css'
 import { MantineProvider } from '@mantine/core'
 import '@mantine/core/styles.css'
+import { Notifications } from '@mantine/notifications'
+import '@mantine/notifications/styles.css'
 import { BrowserRouter } from 'react-router-dom'
 import { Amplify } from 'aws-amplify'
 import { parseAmplifyConfig } from "aws-amplify/utils";
 import outputs from '../amplify_outputs.json'
 import { Provider } from 'react-redux'
 import { store } from './store'
+import { theme } from './theme'
 
 const amplifyConfig = parseAmplifyConfig(outputs);
 
@@ -34,25 +37,25 @@ const HeadphoneIcon = () => (
 );
 
 const BrainIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c96442" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
   </svg>
 );
 
 const ChartIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c96442" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
   </svg>
 );
 
 const BookIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c96442" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
   </svg>
 );
 
 const ShieldIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c96442" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
     <path d="m9 12 2 2 4-4"/>
   </svg>
@@ -141,7 +144,8 @@ const components = {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <MantineProvider>
+    <MantineProvider theme={theme}>
+      <Notifications position="top-center" zIndex={2000} containerWidth={420} mt={72} />
       <BrowserRouter>
         <Provider store={store}>
           <Authenticator components={components} loginMechanisms={['username']}>

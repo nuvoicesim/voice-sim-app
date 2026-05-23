@@ -9,7 +9,4 @@ export const analyticsApi = {
 
   platform: () =>
     apiGet("/analytics/platform"),
-
-  surveys: (params?: Record<string, string>) =>
-    apiGet("/analytics/surveys", params),
 };

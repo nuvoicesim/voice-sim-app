@@ -14,11 +14,11 @@ import {
   putItem,
   generateId,
   generateTimestamp,
-  queryItems,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
 
 const TABLE_NAME = process.env.TABLE_NAME;
+const UNITY_BUILD_TABLE_NAME = process.env.UNITY_BUILD_TABLE_NAME;
 const dynamo = createDynamoDbClient();
 
 export const handler: APIGatewayProxyHandler = async (event) => {
@@ -28,6 +28,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   try {
     if (method === "GET") {
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
+      if (authError) return authError;
       const params = getQueryParams(event.queryStringParameters);
       if (params.sceneId) {
         return await handleGetScene(params.sceneId);
@@ -35,32 +38,32 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleListScenes();
     }
 
+    if (method === "POST" && event.resource?.includes("/archive")) {
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
+      if (authError) return authError;
+      const sceneId = event.pathParameters?.sceneId;
+      if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
+      return await handleArchiveScene(sceneId);
+    }
+
     if (method === "POST") {
-      const caller = extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleCreateScene(event.body);
     }
 
     if (method === "PUT") {
-      const caller = extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["simulation_designer", "admin"]);
       if (authError) return authError;
       const sceneId = event.pathParameters?.sceneId;
       if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
       return await handleUpdateScene(sceneId, event.body);
     }
 
-    if (method === "DELETE") {
-      const caller = extractCallerIdentity(event);
-      const authError = requireRole(caller, ["faculty", "admin"]);
-      if (authError) return authError;
-      const sceneId = event.pathParameters?.sceneId;
-      if (!sceneId) return badRequestResponse("Missing sceneId path parameter");
-      return await handleDeleteScene(sceneId);
-    }
-
-    return methodNotAllowedResponse(["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+    return methodNotAllowedResponse(["GET", "POST", "PUT", "OPTIONS"]);
   } catch (error) {
     console.error("Unhandled error:", error);
     return serverErrorResponse("Internal server error");
@@ -85,10 +88,34 @@ async function handleListScenes() {
 
 async function handleCreateScene(body: string | null) {
   const payload = parseJsonBody(body);
-  const { scenarioKey, title, description, difficulty, tags, unityBuildFolder } = payload;
+  const {
+    scenarioKey,
+    title,
+    description,
+    difficulty,
+    tags,
+    unityBuildId,
+    requiredTaskKeys,
+  } = payload;
 
   if (!scenarioKey || !title) {
     return badRequestResponse("Missing required fields: scenarioKey, title");
+  }
+
+  if (typeof unityBuildId !== "string" || unityBuildId.trim() === "") {
+    return badRequestResponse("Scenes must reference a published Unity build");
+  }
+
+  if (!UNITY_BUILD_TABLE_NAME) {
+    return serverErrorResponse("Unity build configuration is missing");
+  }
+
+  const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId: unityBuildId.trim() }, dynamo);
+  if (!unityBuild) {
+    return badRequestResponse("unityBuildId does not reference an existing Unity build");
+  }
+  if (unityBuild.status !== "published") {
+    return badRequestResponse("Scenes can only link published Unity builds");
   }
 
   const now = generateTimestamp();
@@ -99,7 +126,14 @@ async function handleCreateScene(body: string | null) {
     description: description || "",
     difficulty: difficulty || "medium",
     tags: tags || [],
-    unityBuildFolder: unityBuildFolder || "",
+    unityBuildId: unityBuildId.trim(),
+    unityBuildFolder: "",
+    // Persist requiredTaskKeys only when caller supplied an array. This
+    // mirrors the existing `tags: tags || []` shape and matches the backend
+    // auto-completion contract: missing, null, and empty-array are all
+    // treated as "auto-completion is not configured for this scene"
+    // (loadRequiredTaskKeysForAssignment in session-function/handler.ts).
+    requiredTaskKeys: Array.isArray(requiredTaskKeys) ? requiredTaskKeys : [],
     isActive: true,
     createdAt: now,
     updatedAt: now,
@@ -114,9 +148,36 @@ async function handleUpdateScene(sceneId: string, body: string | null) {
   if (!existing) return notFoundResponse("Scene not found");
 
   const payload = parseJsonBody(body);
+  const nextUnityBuildId =
+    typeof payload.unityBuildId === "string" && payload.unityBuildId.trim() !== ""
+      ? payload.unityBuildId.trim()
+      : typeof existing.unityBuildId === "string" && existing.unityBuildId.trim() !== ""
+        ? existing.unityBuildId.trim()
+        : "";
+
+  if (!nextUnityBuildId) {
+    return badRequestResponse("Scenes must reference a published Unity build");
+  }
+
+  if (!UNITY_BUILD_TABLE_NAME) {
+    return serverErrorResponse("Unity build configuration is missing");
+  }
+
+  const unityBuild = await getItem(UNITY_BUILD_TABLE_NAME, { unityBuildId: nextUnityBuildId }, dynamo);
+  if (!unityBuild) {
+    return badRequestResponse("unityBuildId does not reference an existing Unity build");
+  }
+  if (unityBuild.status !== "published") {
+    return badRequestResponse("Scenes can only link published Unity builds");
+  }
+
+  delete payload.unityBuildFolder;
+
   const updated = {
     ...existing,
     ...payload,
+    unityBuildId: nextUnityBuildId,
+    unityBuildFolder: "",
     sceneId,
     updatedAt: generateTimestamp(),
   };
@@ -125,7 +186,7 @@ async function handleUpdateScene(sceneId: string, body: string | null) {
   return createResponse(HTTP_STATUS.OK, updated);
 }
 
-async function handleDeleteScene(sceneId: string) {
+async function handleArchiveScene(sceneId: string) {
   const existing = await getItem(TABLE_NAME, { sceneId }, dynamo);
   if (!existing) return notFoundResponse("Scene not found");
 
@@ -136,5 +197,5 @@ async function handleDeleteScene(sceneId: string) {
   };
 
   await putItem(TABLE_NAME, updated, dynamo);
-  return createResponse(HTTP_STATUS.OK, { message: "Scene deactivated", sceneId });
+  return createResponse(HTTP_STATUS.OK, { message: "Scene archived", sceneId });
 }

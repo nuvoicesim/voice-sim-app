@@ -21,8 +21,11 @@ export * from './openai';
 // Export context resolver
 export * from './context-resolver';
 
-// Export auth middleware
-export * from './auth-middleware';
+export * from './runtime-token';
+export * from './runtime-config';
+
+// Course-scoped authorization helpers (Canvas-like LMS feature)
+export * from './course-auth';
 
 // Re-export commonly used types for convenience
 export type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";

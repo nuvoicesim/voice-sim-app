@@ -1,0 +1,27 @@
+Module 1: Setup
+Consent. Student reads and submits the consent form. Required to proceed.
+Pre-survey. Baseline questionnaire. Submitting it triggers automatic group randomization on the backend (VOICE_FIRST vs SIMCASE_FIRST), but the group is not revealed yet.
+Module 2: Phase 1
+Phase 1 tutorial. Reveals the student's assigned group and explains what's coming.
+Phase 1A activity. Either an assignment or SimuCase (a page of instructions + external link + recording upload), depending on the group.
+Phase 1A survey. Post-condition survey.
+Phase 1B activity. The opposite modality from 1A, every student experiences both.
+Phase 1B survey. Same question set as 1A survey, different instance.
+Module 3: Phase 2
+Phase 2 tutorial.
+Assignment 1
+Micro-survey 1
+Assignment 2
+Micro-survey 2
+Assignment 3
+Micro-survey 3
+Assignment 4
+Micro-survey 4
+Assignment 5
+Micro-survey 5
+Assignment 6
+Micro-survey 6
+Final survey
+Module 4: Phase 3
+Assignment: AI feedback is auto-generated but not revealed to the student. Two professor reviewers each write their own feedback independently. All three feedbacks stored as blinded (no author shown to the student).
+Survey: Locked until both reviewers have submitted. Submitting the survey reveals the true sources.

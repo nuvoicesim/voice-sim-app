@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-  Title, Text, Badge, Button, Stack, Group, Center, Box,
-  Paper, ThemeIcon, Skeleton, SegmentedControl, Menu,
+  Text, Badge, Button, Stack, Group, Center, Box,
+  Paper, ThemeIcon, Skeleton, SegmentedControl, Menu, Modal,
 } from '@mantine/core';
 import {
   IconClipboardList, IconPlus, IconRocket, IconArchive,
@@ -14,24 +14,29 @@ import { fetchAssignments, selectAssignments, selectAssignmentsLoading } from '.
 import { assignmentApi } from '../../api/assignmentApi';
 import type { AppDispatch } from '../../store';
 import type { Assignment } from '../../slices/assignmentSlice';
+import { PageHeader, EmptyState as EmptyStateCmp } from '../../components/design';
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  draft: { color: 'gray', label: 'Draft' },
-  published: { color: 'green', label: 'Published' },
-  archived: { color: 'red', label: 'Archived' },
+  draft: { color: 'parchment', label: 'Draft' },
+  published: { color: 'terracotta', label: 'Published' },
+  archived: { color: 'parchment', label: 'Archived' },
 };
 
 const MODE_CONFIG: Record<string, { color: string; icon: typeof IconBook2; label: string }> = {
-  practice: { color: 'blue', icon: IconBook2, label: 'Practice' },
-  assessment: { color: 'orange', icon: IconClipboardCheck, label: 'Assessment' },
+  practice: { color: 'parchment', icon: IconBook2, label: 'Practice' },
+  assessment: { color: 'terracotta', icon: IconClipboardCheck, label: 'Assessment' },
 };
 
 function AssignmentRow({
   assignment,
   onStatusChange,
+  onEdit,
+  onArchive,
 }: {
   assignment: Assignment;
   onStatusChange: (id: string, status: string) => void;
+  onEdit: (id: string) => void;
+  onArchive: (assignment: Assignment) => void;
 }) {
   const status = STATUS_CONFIG[assignment.status] ?? STATUS_CONFIG.draft;
   const mode = MODE_CONFIG[assignment.mode] ?? MODE_CONFIG.practice;
@@ -39,40 +44,38 @@ function AssignmentRow({
 
   return (
     <Paper
-      radius="lg" p="md" withBorder
+      radius="lg" p="md"
       style={{
-        border: '1px solid #edf0f5',
-        transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+        background: 'var(--claude-ivory)',
+        border: '1px solid var(--claude-border-cream)',
+        boxShadow: 'var(--claude-shadow-whisper)',
+        transition: 'box-shadow 0.2s ease',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.06)';
-        e.currentTarget.style.transform = 'translateY(-1px)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '';
-        e.currentTarget.style.transform = '';
-      }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta), var(--claude-shadow-whisper)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
     >
       <Group justify="space-between" wrap="nowrap">
         <Group gap="md" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-          <ThemeIcon size={40} radius="xl" variant="light" color={mode.color}>
+          <ThemeIcon size={40} radius="md" variant="light" color={mode.color}>
             <ModeIcon size={20} />
           </ThemeIcon>
           <Box style={{ flex: 1, minWidth: 0 }}>
             <Group gap="xs" mb={2}>
-              <Text fw={600} size="sm" lineClamp={1}>{assignment.title}</Text>
+              <Text fw={500} size="sm" lineClamp={1} c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+                {assignment.title}
+              </Text>
               <Badge variant="light" color={mode.color} size="xs" radius="xl">{mode.label}</Badge>
               <Badge variant="dot" color={status.color} size="xs" radius="xl">{status.label}</Badge>
             </Group>
             <Group gap="lg">
               <Group gap={4}>
-                <IconCalendar size={12} style={{ color: 'var(--mantine-color-gray-5)' }} />
-                <Text size="xs" c="dimmed">
+                <IconCalendar size={12} style={{ color: 'var(--claude-stone)' }} />
+                <Text size="xs" c="var(--claude-olive)">
                   {assignment.dueDate ? new Date(assignment.dueDate).toLocaleDateString() : 'No deadline'}
                 </Text>
               </Group>
               {assignment.description && (
-                <Text size="xs" c="dimmed" lineClamp={1}>{assignment.description}</Text>
+                <Text size="xs" c="var(--claude-olive)" lineClamp={1}>{assignment.description}</Text>
               )}
             </Group>
           </Box>
@@ -81,13 +84,19 @@ function AssignmentRow({
         <Menu position="bottom-end" withArrow shadow="md">
           <Menu.Target>
             <ThemeIcon
-              size={32} radius="xl" variant="light" color="gray"
+              size={32} radius="md" variant="light" color="parchment"
               style={{ cursor: 'pointer' }}
             >
               <IconDotsVertical size={16} />
             </ThemeIcon>
           </Menu.Target>
           <Menu.Dropdown>
+            <Menu.Item
+              leftSection={<IconPencil size={14} />}
+              onClick={() => onEdit(assignment.assignmentId)}
+            >
+              Edit
+            </Menu.Item>
             {assignment.status === 'draft' && (
               <Menu.Item
                 leftSection={<IconRocket size={14} />}
@@ -96,21 +105,21 @@ function AssignmentRow({
                 Publish
               </Menu.Item>
             )}
-            {assignment.status === 'published' && (
-              <Menu.Item
-                leftSection={<IconArchive size={14} />}
-                color="red"
-                onClick={() => onStatusChange(assignment.assignmentId, 'archived')}
-              >
-                Archive
-              </Menu.Item>
-            )}
             {assignment.status === 'archived' && (
               <Menu.Item
                 leftSection={<IconPencil size={14} />}
                 onClick={() => onStatusChange(assignment.assignmentId, 'draft')}
               >
                 Move to Draft
+              </Menu.Item>
+            )}
+            {assignment.status !== 'archived' && (
+              <Menu.Item
+                leftSection={<IconArchive size={14} />}
+                color="terracotta"
+                onClick={() => onArchive(assignment)}
+              >
+                Archive
               </Menu.Item>
             )}
           </Menu.Dropdown>
@@ -139,40 +148,16 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyState() {
-  return (
-    <Center style={{ minHeight: 300 }}>
-      <Stack align="center" gap="lg">
-        <Box
-          style={{
-            width: 88,
-            height: 88,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <IconInbox size={40} style={{ color: '#9ba3c2' }} />
-        </Box>
-        <Box style={{ textAlign: 'center' }}>
-          <Title order={4} c="dark.4" mb={4}>No assignments yet</Title>
-          <Text c="dimmed" size="sm" maw={300} style={{ lineHeight: 1.6 }}>
-            Create your first assignment to get started.
-          </Text>
-        </Box>
-      </Stack>
-    </Center>
-  );
-}
-
 export default function AssignmentManagement() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
+  const createAssignmentPath = '/faculty/assignments/new';
+  const assignmentEditBasePath = '/faculty/assignments';
   const assignments = useSelector(selectAssignments);
   const loading = useSelector(selectAssignmentsLoading);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [archiveTarget, setArchiveTarget] = useState<Assignment | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     dispatch(fetchAssignments());
@@ -181,6 +166,22 @@ export default function AssignmentManagement() {
   const handleStatusChange = async (assignmentId: string, status: string) => {
     await assignmentApi.updateStatus(assignmentId, status);
     dispatch(fetchAssignments());
+  };
+
+  const handleEdit = (assignmentId: string) => {
+    navigate(`${assignmentEditBasePath}/${assignmentId}/edit`);
+  };
+
+  const handleArchive = async () => {
+    if (!archiveTarget) return;
+    setArchiving(true);
+    try {
+      await assignmentApi.updateStatus(archiveTarget.assignmentId, 'archived');
+      setArchiveTarget(null);
+      dispatch(fetchAssignments());
+    } finally {
+      setArchiving(false);
+    }
   };
 
   const filtered = statusFilter === 'all'
@@ -193,29 +194,20 @@ export default function AssignmentManagement() {
 
   return (
     <Stack gap="xl">
-      {/* ── Header ── */}
-      <Group justify="space-between" align="flex-start">
-        <Box>
-          <Group gap="sm" mb={4}>
-            <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'violet', to: 'indigo' }}>
-              <IconClipboardList size={20} color="white" />
-            </ThemeIcon>
-            <Title order={2} fw={700}>Assignment Management</Title>
-          </Group>
-          <Text c="dimmed" size="sm" ml={52}>
-            Create, publish, and manage assignments
-          </Text>
-        </Box>
-        <Button
-          radius="xl"
-          leftSection={<IconPlus size={16} />}
-          variant="gradient"
-          gradient={{ from: 'indigo', to: 'violet' }}
-          onClick={() => navigate('/faculty/assignments/new')}
-        >
-          New Assignment
-        </Button>
-      </Group>
+      <PageHeader
+        title="Assignment Management"
+        subtitle="Create, publish, and manage assignments"
+        actions={
+          <Button
+            radius="lg"
+            color="terracotta"
+            leftSection={<IconPlus size={16} />}
+            onClick={() => navigate(createAssignmentPath)}
+          >
+            New Assignment
+          </Button>
+        }
+      />
 
       {/* ── Filter ── */}
       {!loading && assignments.length > 0 && (
@@ -223,6 +215,7 @@ export default function AssignmentManagement() {
           value={statusFilter}
           onChange={setStatusFilter}
           radius="xl"
+          color="terracotta"
           data={[
             { label: `All (${assignments.length})`, value: 'all' },
             { label: `Draft (${draftCount})`, value: 'draft' },
@@ -236,14 +229,20 @@ export default function AssignmentManagement() {
       {loading ? (
         <LoadingSkeleton />
       ) : assignments.length === 0 ? (
-        <EmptyState />
+        <EmptyStateCmp
+          icon={<IconInbox size={28} />}
+          title="No assignments yet"
+          description="Create your first assignment to get started."
+          ctaLabel="New Assignment"
+          onCta={() => navigate(createAssignmentPath)}
+        />
       ) : filtered.length === 0 ? (
         <Center style={{ minHeight: 200 }}>
           <Stack align="center" gap="sm">
-            <ThemeIcon size={48} radius="xl" variant="light" color="gray">
+            <ThemeIcon size={48} radius="md" variant="light" color="parchment">
               <IconClipboardList size={24} />
             </ThemeIcon>
-            <Text c="dimmed" size="sm">No assignments in this category</Text>
+            <Text c="var(--claude-stone)" size="sm">No assignments in this category</Text>
           </Stack>
         </Center>
       ) : (
@@ -253,10 +252,35 @@ export default function AssignmentManagement() {
               key={a.assignmentId}
               assignment={a}
               onStatusChange={handleStatusChange}
+              onEdit={handleEdit}
+              onArchive={setArchiveTarget}
             />
           ))}
         </Stack>
       )}
+
+      <Modal
+        opened={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        title="Archive Assignment"
+        size="sm"
+        radius="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="var(--claude-near-black)">
+            Archive <b>{archiveTarget?.title}</b>? This will remove the assignment from active use,
+            but keep historical session data intact.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="subtle" color="parchment" radius="md" onClick={() => setArchiveTarget(null)}>
+              Cancel
+            </Button>
+            <Button color="terracotta" radius="md" onClick={handleArchive} loading={archiving}>
+              Archive
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

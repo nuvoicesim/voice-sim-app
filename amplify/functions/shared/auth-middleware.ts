@@ -4,9 +4,13 @@
  */
 
 import type { APIGatewayProxyEvent } from "aws-lambda";
+import {
+  AdminGetUserCommand,
+  CognitoIdentityProviderClient,
+} from "@aws-sdk/client-cognito-identity-provider";
 import { createResponse, HTTP_STATUS } from "./http";
 
-export type UserRole = "student" | "faculty" | "admin";
+export type UserRole = "student" | "faculty" | "simulation_designer" | "admin";
 
 export interface CallerIdentity {
   userId: string;
@@ -14,31 +18,128 @@ export interface CallerIdentity {
   email?: string;
 }
 
-/**
- * Extract caller identity from the API Gateway event.
- *
- * During Phase 0-1, role is passed in the request header `x-user-role`
- * and userId in `x-user-id` (set by the frontend from Cognito attributes).
- *
- * In a future phase, this should be replaced with Cognito authorizer claims
- * parsed from event.requestContext.authorizer.
- */
-export function extractCallerIdentity(event: APIGatewayProxyEvent): CallerIdentity | null {
-  const userId = event.headers?.["x-user-id"] || event.headers?.["X-User-Id"];
-  const role = event.headers?.["x-user-role"] || event.headers?.["X-User-Role"];
+type AuthorizerClaims = Record<string, unknown>;
+const USER_POOL_ID = process.env.USER_POOL_ID;
+const cognitoClient = new CognitoIdentityProviderClient({ region: process.env.AWS_REGION || "us-east-1" });
 
-  if (!userId || !role) {
+function getClaim(
+  claims: AuthorizerClaims,
+  ...names: string[]
+): string | undefined {
+  for (const name of names) {
+    const value = claims[name];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
+
+function extractClaimsIdentity(event: APIGatewayProxyEvent): CallerIdentity | null {
+  const claims = event.requestContext.authorizer?.claims as AuthorizerClaims | undefined;
+  if (!claims) {
     return null;
   }
 
-  if (!isValidRole(role)) {
+  const userId = getClaim(claims, "sub");
+  const role = getClaim(claims, "custom:role", "role");
+
+  if (!userId || !role || !isValidRole(role)) {
     return null;
   }
 
   return {
     userId,
     role: role as UserRole,
-    email: event.headers?.["x-user-email"] || event.headers?.["X-User-Email"],
+    email: getClaim(claims, "email"),
+  };
+}
+
+async function loadRoleFromCognito(claims: AuthorizerClaims): Promise<UserRole | null> {
+  if (!USER_POOL_ID) {
+    console.warn("auth role fallback skipped: USER_POOL_ID missing");
+    return null;
+  }
+
+  const username = getClaim(claims, "cognito:username", "username", "email");
+  if (!username) {
+    console.warn("auth role fallback skipped: no username/email claim");
+    return null;
+  }
+
+  try {
+    const result = await cognitoClient.send(new AdminGetUserCommand({
+      UserPoolId: USER_POOL_ID,
+      Username: username,
+    }));
+    const role = result.UserAttributes?.find((attribute) => attribute.Name === "custom:role")?.Value;
+    if (!role) {
+      console.warn("auth role fallback defaulted to student", { username });
+      return "student";
+    }
+
+    if (!isValidRole(role)) {
+      console.warn("auth role fallback returned invalid role", { username, role });
+      return null;
+    }
+
+    console.log("auth role fallback used", { username, role });
+    return role as UserRole;
+  } catch (error) {
+    console.error("Failed to load Cognito role fallback", { username, error });
+    return null;
+  }
+}
+
+/**
+ * Extract caller identity from verified Cognito authorizer claims.
+ */
+export async function extractCallerIdentity(event: APIGatewayProxyEvent): Promise<CallerIdentity | null> {
+  const claims = event.requestContext.authorizer?.claims as AuthorizerClaims | undefined;
+  if (!claims) {
+    console.warn("auth identity diagnostic", { hasClaims: false });
+    return null;
+  }
+
+  console.log("auth identity diagnostic", {
+    hasClaims: true,
+    hasSub: Boolean(getClaim(claims, "sub")),
+    hasEmail: Boolean(getClaim(claims, "email")),
+    hasRoleClaim: Boolean(getClaim(claims, "custom:role", "role")),
+    hasUsernameClaim: Boolean(getClaim(claims, "cognito:username", "username")),
+    claimKeys: Object.keys(claims).sort(),
+  });
+
+  const claimsIdentity = extractClaimsIdentity(event);
+  if (claimsIdentity) {
+    console.log("auth identity resolved from token claims", {
+      userId: claimsIdentity.userId,
+      role: claimsIdentity.role,
+    });
+    return claimsIdentity;
+  }
+
+  const userId = getClaim(claims, "sub");
+  console.log("auth identity attempting role fallback", {
+    hasUserPoolId: Boolean(USER_POOL_ID),
+    userId,
+    username: getClaim(claims, "cognito:username", "username", "email"),
+  });
+  const role = await loadRoleFromCognito(claims);
+  if (!userId || !role) {
+    console.warn("auth identity unresolved", {
+      hasUserId: Boolean(userId),
+      hasRole: Boolean(role),
+    });
+    return null;
+  }
+
+  console.log("auth identity resolved from Cognito fallback", { userId, role });
+  return {
+    userId,
+    role,
+    email: getClaim(claims, "email"),
   };
 }
 
@@ -52,7 +153,7 @@ export function requireRole(
 ) {
   if (!caller) {
     return createResponse(HTTP_STATUS.UNAUTHORIZED, {
-      error: "Missing authentication headers (x-user-id, x-user-role)",
+      error: "Authentication required",
     });
   }
 
@@ -65,6 +166,16 @@ export function requireRole(
   return null;
 }
 
+export function requireAuthenticated(caller: CallerIdentity | null) {
+  if (!caller) {
+    return createResponse(HTTP_STATUS.UNAUTHORIZED, {
+      error: "Authentication required",
+    });
+  }
+
+  return null;
+}
+
 function isValidRole(role: string): boolean {
-  return ["student", "faculty", "admin"].includes(role);
+  return ["student", "faculty", "simulation_designer", "admin"].includes(role);
 }

@@ -2,43 +2,24 @@ import { useEffect, useState, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  Title, Text, Badge, Button, Center, Stack, Group,
-  Paper, TextInput, SegmentedControl, SimpleGrid, Box,
+  Text, Badge, Button, Center, Stack, Group,
+  Paper, TextInput, SegmentedControl, SimpleGrid, Box, Alert,
   ThemeIcon, Skeleton,
 } from '@mantine/core';
 import {
-  IconSearch, IconRocket, IconBook2, IconClipboardCheck,
-  IconCalendar, IconRepeat, IconInbox, IconPlayerPlay,
+  IconSearch, IconBook2, IconClipboardCheck,
+  IconCalendar, IconRepeat, IconInbox, IconPlayerPlay, IconAlertCircle, IconBook,
 } from '@tabler/icons-react';
 import { fetchAssignments, selectAssignments, selectAssignmentsLoading } from '../../slices/assignmentSlice';
 import { startSession } from '../../slices/sessionSlice';
-import { sceneCatalogApi } from '../../api/sceneCatalogApi';
+import { fetchCourses, selectCourses } from '../../slices/courseSlice';
 import type { AppDispatch } from '../../store';
 import type { Assignment } from '../../slices/assignmentSlice';
+import { PageHeader, StatCard, EmptyState as EmptyStateCmp } from '../../components/design';
 
-interface SceneInfo {
-  sceneId: string;
-  unityBuildFolder?: string;
-}
-
-const MODE_CONFIG: Record<string, {
-  color: string;
-  gradient: string;
-  icon: typeof IconBook2;
-  label: string;
-}> = {
-  practice: {
-    color: 'blue',
-    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    icon: IconBook2,
-    label: 'Practice',
-  },
-  assessment: {
-    color: 'orange',
-    gradient: 'linear-gradient(135deg, #f5af19 0%, #f12711 100%)',
-    icon: IconClipboardCheck,
-    label: 'Assessment',
-  },
+const MODE_CONFIG: Record<string, { color: string; icon: typeof IconBook2; label: string }> = {
+  practice: { color: 'parchment', icon: IconBook2, label: 'Practice' },
+  assessment: { color: 'terracotta', icon: IconClipboardCheck, label: 'Assessment' },
 };
 
 function getRelativeDue(dateStr: string): { text: string; urgent: boolean } {
@@ -62,10 +43,12 @@ function AssignmentCard({
   assignment,
   onLaunch,
   launching,
+  courseTitle,
 }: {
   assignment: Assignment;
-  onLaunch: (assignmentId: string, sceneId: string) => void;
+  onLaunch: (assignmentId: string) => void;
   launching: string | null;
+  courseTitle?: string;
 }) {
   const modeConf = MODE_CONFIG[assignment.mode] ?? MODE_CONFIG.practice;
   const ModeIcon = modeConf.icon;
@@ -74,36 +57,50 @@ function AssignmentCard({
 
   return (
     <Paper
-      shadow="sm"
       radius="lg"
       p={0}
-      withBorder
       style={{
         overflow: 'hidden',
-        transition: 'box-shadow 0.2s ease, transform 0.2s ease',
-        border: '1px solid #edf0f5',
+        background: 'var(--claude-ivory)',
+        border: '1px solid var(--claude-border-cream)',
+        boxShadow: 'var(--claude-shadow-whisper)',
+        transition: 'box-shadow 0.2s ease',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = '';
-        e.currentTarget.style.transform = '';
-      }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta), var(--claude-shadow-whisper)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
     >
-      <Box style={{ height: 4, background: modeConf.gradient }} />
-
       <Box p="lg">
         <Group justify="space-between" align="flex-start" mb="sm">
           <Group gap="sm" align="flex-start" style={{ flex: 1, minWidth: 0 }}>
-            <ThemeIcon size={44} radius="xl" variant="light" color={modeConf.color}>
+            <ThemeIcon size={44} radius="md" variant="light" color={modeConf.color}>
               <ModeIcon size={22} />
             </ThemeIcon>
             <Box style={{ flex: 1, minWidth: 0 }}>
-              <Text fw={600} size="md" lineClamp={1}>{assignment.title}</Text>
+              {courseTitle && (
+                <Box
+                  mb={8}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    background: 'var(--claude-border-cream)',
+                    border: '1px solid var(--claude-border-warm)',
+                    maxWidth: '100%',
+                  }}
+                >
+                  <IconBook size={13} style={{ color: 'var(--claude-terracotta)', flexShrink: 0 }} />
+                  <Text size="xs" c="var(--claude-charcoal)" fw={500} lineClamp={1} style={{ letterSpacing: 0.2 }}>
+                    {courseTitle}
+                  </Text>
+                </Box>
+              )}
+              <Text fw={500} size="md" lineClamp={1} c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+                {assignment.title}
+              </Text>
               {assignment.description && (
-                <Text size="xs" c="dimmed" lineClamp={2} mt={2} style={{ lineHeight: 1.5 }}>
+                <Text size="xs" c="var(--claude-olive)" lineClamp={2} mt={4} style={{ lineHeight: 1.6 }}>
                   {assignment.description}
                 </Text>
               )}
@@ -114,32 +111,25 @@ function AssignmentCard({
           </Badge>
         </Group>
 
-        <Box
-          mb="md"
-          p="sm"
-          style={{ background: '#f8f9fb', borderRadius: 10 }}
-        >
+        <Box mb="md" p="sm" style={{ background: 'var(--claude-parchment)', borderRadius: 10 }}>
           <Group gap="lg">
             {dueInfo && (
               <Group gap={6}>
-                <IconCalendar
-                  size={14}
-                  style={{ color: dueInfo.urgent ? 'var(--mantine-color-red-6)' : 'var(--mantine-color-gray-5)' }}
-                />
-                <Text size="xs" fw={500} c={dueInfo.urgent ? 'red.6' : 'dimmed'}>
+                <IconCalendar size={14} style={{ color: dueInfo.urgent ? 'var(--claude-terracotta)' : 'var(--claude-stone)' }} />
+                <Text size="xs" fw={500} c={dueInfo.urgent ? 'var(--claude-terracotta)' : 'var(--claude-olive)'}>
                   {dueInfo.text}
                 </Text>
               </Group>
             )}
             {!dueInfo && (
               <Group gap={6}>
-                <IconCalendar size={14} style={{ color: 'var(--mantine-color-gray-4)' }} />
-                <Text size="xs" c="dimmed">No deadline</Text>
+                <IconCalendar size={14} style={{ color: 'var(--claude-warm-silver)' }} />
+                <Text size="xs" c="var(--claude-stone)">No deadline</Text>
               </Group>
             )}
             <Group gap={6}>
-              <IconRepeat size={14} style={{ color: 'var(--mantine-color-gray-5)' }} />
-              <Text size="xs" c="dimmed">
+              <IconRepeat size={14} style={{ color: 'var(--claude-stone)' }} />
+              <Text size="xs" c="var(--claude-olive)">
                 {assignment.attemptPolicy?.maxAttempts === -1
                   ? 'Unlimited'
                   : `${assignment.attemptPolicy?.maxAttempts} attempts`}
@@ -150,12 +140,12 @@ function AssignmentCard({
 
         <Button
           fullWidth
-          variant="light"
-          color="indigo"
+          variant="filled"
+          color="terracotta"
           radius="md"
           size="sm"
           rightSection={<IconPlayerPlay size={16} />}
-          onClick={() => onLaunch(assignment.assignmentId, assignment.sceneId)}
+          onClick={() => onLaunch(assignment.assignmentId)}
           loading={isLaunching}
         >
           Launch Simulation
@@ -169,8 +159,7 @@ function LoadingSkeleton() {
   return (
     <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
       {Array.from({ length: 6 }).map((_, i) => (
-        <Paper key={i} shadow="sm" radius="lg" withBorder style={{ overflow: 'hidden' }}>
-          <Skeleton height={4} radius={0} />
+        <Paper key={i} radius="lg" withBorder style={{ overflow: 'hidden' }}>
           <Box p="lg">
             <Group mb="sm">
               <Skeleton circle height={44} />
@@ -188,68 +177,27 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyState() {
-  return (
-    <Center style={{ minHeight: 360 }}>
-      <Stack align="center" gap="lg">
-        <Box
-          style={{
-            width: 100,
-            height: 100,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <IconInbox size={44} style={{ color: '#9ba3c2' }} />
-        </Box>
-        <Box style={{ textAlign: 'center' }}>
-          <Title order={4} c="dark.4" mb={4}>No assignments yet</Title>
-          <Text c="dimmed" size="sm" maw={300} style={{ lineHeight: 1.6 }}>
-            When your instructor publishes new assignments, they will appear here. Check back soon!
-          </Text>
-        </Box>
-      </Stack>
-    </Center>
-  );
-}
-
-function NoResultsState() {
-  return (
-    <Center style={{ minHeight: 240 }}>
-      <Stack align="center" gap="sm">
-        <ThemeIcon size={52} radius="xl" variant="light" color="gray">
-          <IconSearch size={26} />
-        </ThemeIcon>
-        <Text c="dimmed" size="sm">No assignments match your filters</Text>
-      </Stack>
-    </Center>
-  );
-}
-
 export default function AssignmentsPage() {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const assignments = useSelector(selectAssignments);
+  const courses = useSelector(selectCourses);
   const loading = useSelector(selectAssignmentsLoading);
-  const [sceneMap, setSceneMap] = useState<Record<string, SceneInfo>>({});
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState('all');
   const [launching, setLaunching] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchAssignments({ status: 'published' }));
-    sceneCatalogApi.list().then((data) => {
-      const scenes = data.scenes || data.Items || [];
-      const map: Record<string, SceneInfo> = {};
-      for (const s of scenes) {
-        map[s.sceneId] = { sceneId: s.sceneId, unityBuildFolder: s.unityBuildFolder };
-      }
-      setSceneMap(map);
-    }).catch(() => {});
+    dispatch(fetchCourses());
   }, [dispatch]);
+
+  const courseTitleByCourseId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of courses) map[c.courseId] = c.title;
+    return map;
+  }, [courses]);
 
   const filtered = useMemo(() => {
     let list = assignments;
@@ -265,17 +213,19 @@ export default function AssignmentsPage() {
     return list;
   }, [assignments, modeFilter, search]);
 
-  const handleLaunch = async (assignmentId: string, sceneId: string) => {
+  const handleLaunch = async (assignmentId: string) => {
     setLaunching(assignmentId);
+    setLaunchError(null);
     try {
-      const result = await dispatch(startSession(assignmentId));
-      if (startSession.fulfilled.match(result)) {
-        const sessionId = result.payload.session.sessionId;
-        const scene = sceneMap[sceneId];
-        navigate(`/student/session/${sessionId}`, {
-          state: { unityBuildFolder: scene?.unityBuildFolder || null },
-        });
-      }
+      const result = await dispatch(startSession(assignmentId)).unwrap();
+      const sessionId = result.session.sessionId;
+      navigate(`/student/session/${sessionId}`, {
+        state: {
+          unityLaunchUrl: result.session.unityLaunchUrl || null,
+        },
+      });
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : 'Failed to launch simulation');
     } finally {
       setLaunching(null);
     }
@@ -286,84 +236,23 @@ export default function AssignmentsPage() {
 
   return (
     <Stack gap="xl">
-      {/* ── Page header ── */}
-      <Box>
-        <Group gap="sm" mb={4}>
-          <ThemeIcon size={38} radius="xl" variant="gradient" gradient={{ from: 'indigo', to: 'violet' }}>
-            <IconRocket size={20} color="white" />
-          </ThemeIcon>
-          <Title order={2} fw={700}>My Assignments</Title>
-        </Group>
-        <Text c="dimmed" size="sm" ml={52}>
-          Launch simulations and track your learning progress
-        </Text>
-      </Box>
+      <PageHeader
+        title="My Assignments"
+        subtitle="Launch simulations and track your learning progress"
+      />
+
+      {launchError && (
+        <Alert color="terracotta" radius="md" icon={<IconAlertCircle size={16} />}>
+          {launchError}
+        </Alert>
+      )}
 
       {/* ── Stats overview ── */}
       {!loading && assignments.length > 0 && (
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-          <Paper
-            radius="lg"
-            p="md"
-            style={{
-              background: 'linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%)',
-              border: '1px solid #dbe1ff',
-            }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Total
-                </Text>
-                <Title order={2} c="indigo.7" mt={2}>{assignments.length}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="indigo">
-                <IconBook2 size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
-
-          <Paper
-            radius="lg"
-            p="md"
-            style={{
-              background: 'linear-gradient(135deg, #eef5ff 0%, #e0edff 100%)',
-              border: '1px solid #c9deff',
-            }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Practice
-                </Text>
-                <Title order={2} c="blue.7" mt={2}>{practiceCount}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="blue">
-                <IconBook2 size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
-
-          <Paper
-            radius="lg"
-            p="md"
-            style={{
-              background: 'linear-gradient(135deg, #fff7f0 0%, #fff0e6 100%)',
-              border: '1px solid #ffdfc4',
-            }}
-          >
-            <Group justify="space-between" align="center">
-              <Box>
-                <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Assessment
-                </Text>
-                <Title order={2} c="orange.7" mt={2}>{assessmentCount}</Title>
-              </Box>
-              <ThemeIcon size={42} radius="xl" variant="light" color="orange">
-                <IconClipboardCheck size={22} />
-              </ThemeIcon>
-            </Group>
-          </Paper>
+          <StatCard label="Total" value={assignments.length} icon={<IconBook2 size={22} />} />
+          <StatCard label="Practice" value={practiceCount} icon={<IconBook2 size={22} />} accent="parchment" />
+          <StatCard label="Assessment" value={assessmentCount} icon={<IconClipboardCheck size={22} />} />
         </SimpleGrid>
       )}
 
@@ -382,6 +271,7 @@ export default function AssignmentsPage() {
             value={modeFilter}
             onChange={setModeFilter}
             radius="xl"
+            color="terracotta"
             data={[
               { label: `All (${assignments.length})`, value: 'all' },
               { label: `Practice (${practiceCount})`, value: 'practice' },
@@ -395,9 +285,20 @@ export default function AssignmentsPage() {
       {loading ? (
         <LoadingSkeleton />
       ) : assignments.length === 0 ? (
-        <EmptyState />
+        <EmptyStateCmp
+          icon={<IconInbox size={28} />}
+          title="No assignments yet"
+          description="When your instructor publishes new assignments, they will appear here. Check back soon!"
+        />
       ) : filtered.length === 0 ? (
-        <NoResultsState />
+        <Center style={{ minHeight: 240 }}>
+          <Stack align="center" gap="sm">
+            <ThemeIcon size={52} radius="lg" variant="light" color="parchment">
+              <IconSearch size={26} />
+            </ThemeIcon>
+            <Text c="var(--claude-stone)" size="sm">No assignments match your filters</Text>
+          </Stack>
+        </Center>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
           {filtered.map((a) => (
@@ -406,6 +307,7 @@ export default function AssignmentsPage() {
               assignment={a}
               onLaunch={handleLaunch}
               launching={launching}
+              courseTitle={a.courseId ? courseTitleByCourseId[a.courseId] : undefined}
             />
           ))}
         </SimpleGrid>

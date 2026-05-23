@@ -8,7 +8,7 @@ import {
   HTTP_STATUS,
   createDynamoDbClient,
 } from "../shared";
-import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import { extractCallerIdentity, requireAuthenticated, requireRole } from "../shared/auth-middleware";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 
 const SESSION_TABLE = process.env.SESSION_TABLE_NAME;
@@ -28,7 +28,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   try {
-    const caller = extractCallerIdentity(event);
+    const caller = await extractCallerIdentity(event);
+    const authRequiredError = requireAuthenticated(caller);
+    if (authRequiredError) return authRequiredError;
     const params = getQueryParams(event.queryStringParameters);
 
     // GET /analytics/student/{studentUserId}
@@ -42,7 +44,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     // GET /analytics/surveys
     if (event.resource?.includes("/surveys")) {
-      const authError = requireRole(caller, ["faculty", "admin"]);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
       if (authError) return authError;
       return await handleSurveyAnalytics(params);
     }
@@ -55,7 +57,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     // GET /analytics/cohort
-    const authError = requireRole(caller, ["faculty", "admin"]);
+    const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
     if (authError) return authError;
     return await handleCohortAnalytics(params);
   } catch (error) {
