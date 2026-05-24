@@ -1,6 +1,6 @@
-import { Group, ActionIcon, Tooltip } from "@mantine/core";
+import { Group, ActionIcon, Tooltip, Modal, Stack, Button, NumberInput, Text } from "@mantine/core";
 import { IconBold, IconItalic, IconHighlight, IconLink, IconList, IconHeading, IconPhoto } from "@tabler/icons-react";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMarkdownImageUpload } from "./useMarkdownImageUpload";
 
 interface Props {
@@ -31,6 +31,8 @@ function wrapSelection(
 export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading } = useMarkdownImageUpload();
+  const [pendingInsert, setPendingInsert] = useState<{ publicUrl: string; alt: string } | null>(null);
+  const [selectedSize, setSelectedSize] = useState<number | null>(400);
 
   const handleBold = useCallback(() => {
     onChange(wrapSelection(value, textareaRef.current, "**", "**", "bold"));
@@ -103,64 +105,134 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
     e.target.value = ""; // reset so picking the same file twice re-fires
     if (!file) return;
     try {
-      const { publicUrl, alt } = await upload(file);
-      const ta = textareaRef.current;
-      const insertion = `![${alt}](${publicUrl})`;
-      if (!ta) {
-        onChange(value + insertion);
-        return;
-      }
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      onChange(value.slice(0, start) + insertion + value.slice(end));
+      const result = await upload(file);
+      setSelectedSize(400);
+      setPendingInsert(result);
     } catch (err) {
       // Hook already surfaces error state; toolbar stays silent here.
+      // eslint-disable-next-line no-console
       console.error("image upload failed", err);
     }
   };
 
+  const confirmInsert = () => {
+    if (!pendingInsert) return;
+    const { publicUrl, alt } = pendingInsert;
+    const suffix = selectedSize ? `|${selectedSize}` : "";
+    const insertion = `![${alt}${suffix}](${publicUrl})`;
+    const ta = textareaRef.current;
+    if (!ta) {
+      onChange(value + insertion);
+    } else {
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      onChange(value.slice(0, start) + insertion + value.slice(end));
+    }
+    setPendingInsert(null);
+  };
+
+  const cancelInsert = () => setPendingInsert(null);
+
   return (
-    <Group gap={4} mb={4}>
-      <Tooltip label="Bold (Ctrl+B)">
-        <ActionIcon variant="subtle" onClick={handleBold} aria-label="Bold">
-          <IconBold size={14} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label="Italic">
-        <ActionIcon variant="subtle" onClick={handleItalic} aria-label="Italic">
-          <IconItalic size={14} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label="Highlight">
-        <ActionIcon variant="subtle" onClick={handleHighlight} aria-label="Highlight">
-          <IconHighlight size={14} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label="Insert link">
-        <ActionIcon variant="subtle" onClick={handleLink} aria-label="Link">
-          <IconLink size={14} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label="List">
-        <ActionIcon variant="subtle" onClick={handleList} aria-label="List">
-          <IconList size={14} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label="Heading">
-        <ActionIcon variant="subtle" onClick={handleHeading} aria-label="Heading">
-          <IconHeading size={14} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label={uploading ? "Uploading..." : "Insert image"}>
-        <ActionIcon
-          variant="subtle"
-          onClick={handleImageButton}
-          aria-label="Image"
-          loading={uploading}
-        >
-          <IconPhoto size={14} />
-        </ActionIcon>
-      </Tooltip>
+    <>
+      <Group gap={4} mb={4}>
+        <Tooltip label="Bold (Ctrl+B)">
+          <ActionIcon variant="subtle" onClick={handleBold} aria-label="Bold">
+            <IconBold size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Italic">
+          <ActionIcon variant="subtle" onClick={handleItalic} aria-label="Italic">
+            <IconItalic size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Highlight">
+          <ActionIcon variant="subtle" onClick={handleHighlight} aria-label="Highlight">
+            <IconHighlight size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Insert link">
+          <ActionIcon variant="subtle" onClick={handleLink} aria-label="Link">
+            <IconLink size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="List">
+          <ActionIcon variant="subtle" onClick={handleList} aria-label="List">
+            <IconList size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Heading">
+          <ActionIcon variant="subtle" onClick={handleHeading} aria-label="Heading">
+            <IconHeading size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label={uploading ? "Uploading..." : "Insert image"}>
+          <ActionIcon
+            variant="subtle"
+            onClick={handleImageButton}
+            aria-label="Image"
+            loading={uploading}
+          >
+            <IconPhoto size={14} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+      <Modal
+        opened={!!pendingInsert}
+        onClose={cancelInsert}
+        title="Insert image"
+        size="sm"
+        centered
+      >
+        <Stack gap="xs">
+          <Text size="sm">Choose width:</Text>
+          <Group gap="xs">
+            <Button
+              variant={selectedSize === 200 ? "filled" : "light"}
+              onClick={() => setSelectedSize(200)}
+              size="xs"
+            >
+              Small
+            </Button>
+            <Button
+              variant={selectedSize === 400 ? "filled" : "light"}
+              onClick={() => setSelectedSize(400)}
+              size="xs"
+            >
+              Medium
+            </Button>
+            <Button
+              variant={selectedSize === 600 ? "filled" : "light"}
+              onClick={() => setSelectedSize(600)}
+              size="xs"
+            >
+              Large
+            </Button>
+            <Button
+              variant={selectedSize === null ? "filled" : "light"}
+              onClick={() => setSelectedSize(null)}
+              size="xs"
+            >
+              Original
+            </Button>
+          </Group>
+          <NumberInput
+            label="Custom width (px)"
+            placeholder="200-2000"
+            value={selectedSize ?? ""}
+            onChange={(v) => setSelectedSize(typeof v === "number" ? v : null)}
+            min={50}
+            max={2000}
+            step={50}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button variant="subtle" onClick={cancelInsert}>
+              Cancel
+            </Button>
+            <Button onClick={confirmInsert}>Insert</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <input
         ref={fileInputRef}
         type="file"
@@ -169,6 +241,6 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
         data-testid="markdown-image-input"
         onChange={handleImageSelected}
       />
-    </Group>
+    </>
   );
 }

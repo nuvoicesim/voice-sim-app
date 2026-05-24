@@ -1,8 +1,10 @@
 import { Box } from "@mantine/core";
 import { marked } from "marked";
 import { highlightExtension } from "./markedHighlight";
+import { imageSizeExtension } from "./markedImageSize";
 
 marked.use(highlightExtension);
+marked.use(imageSizeExtension);
 
 export function MarkdownView({ markdown }: { markdown: string }) {
   const html = (() => {
