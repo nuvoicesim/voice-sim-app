@@ -227,6 +227,25 @@ describe("chooseGroupBalanced", () => {
     expect(increment).not.toHaveBeenCalled();
   });
 
+  it("throws when defaultGroupKey does not match any group key in groups[]", async () => {
+    const increment = vi.fn();
+    const resolveBucket = vi.fn(async () => "nonConsented" as const);
+
+    await expect(
+      chooseGroupBalanced({
+        groups: TWO_GROUPS,
+        consentItemId: "consent-1",
+        defaultGroupKey: "GROUP_TYPO",
+        callerUserId: "u1",
+        itemId: "item-1",
+        resolveBucket,
+        incrementCounter: increment,
+      })
+    ).rejects.toThrow(/defaultGroupKey/i);
+
+    expect(increment).not.toHaveBeenCalled();
+  });
+
   it("throws when groups array is empty", async () => {
     const increment = vi.fn();
     const resolveBucket = vi.fn(async () => "consented" as const);

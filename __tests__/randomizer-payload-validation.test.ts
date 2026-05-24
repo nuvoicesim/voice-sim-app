@@ -55,4 +55,22 @@ describe("validateRandomizerPayload", () => {
       /defaultGroupKey/
     );
   });
+
+  it("rejects a defaultGroupKey that does not appear in groups[]", () => {
+    expect(
+      validateRandomizerPayload({
+        groups: [{ key: "A" }, { key: "B" }],
+        defaultGroupKey: "TYPO",
+      })
+    ).toMatch(/defaultGroupKey/);
+  });
+
+  it("accepts a defaultGroupKey that appears in groups[]", () => {
+    expect(
+      validateRandomizerPayload({
+        groups: [{ key: "A" }, { key: "B" }],
+        defaultGroupKey: "B",
+      })
+    ).toBeNull();
+  });
 });

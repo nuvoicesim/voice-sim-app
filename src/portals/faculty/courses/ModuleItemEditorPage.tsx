@@ -529,12 +529,19 @@ function RandomizerPayloadEditor({
           <Select
             label="Default group for non-consented students"
             description="Students who decline or have not yet decided land here without affecting the 1:1 counter."
-            placeholder="(none — round-robin them across all groups)"
+            placeholder="(none — use a separate non-consented round-robin bucket)"
             clearable
             data={groups.filter((g) => g.key).map((g) => ({ value: g.key, label: g.label || g.key }))}
             value={payload.defaultGroupKey || null}
             onChange={(v) => onChange({ defaultGroupKey: v || undefined })}
           />
+          {payload.defaultGroupKey &&
+            !groups.some((g) => g.key === payload.defaultGroupKey) && (
+              <Alert color="orange">
+                Default group "{payload.defaultGroupKey}" no longer exists in this
+                randomizer's groups. Pick a new one or clear it before saving.
+              </Alert>
+            )}
         </>
       )}
       <Select

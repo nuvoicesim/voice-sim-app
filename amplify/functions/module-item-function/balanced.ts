@@ -21,7 +21,8 @@ export interface ChooseGroupBalancedArgs {
    * Group key that non-consented (declined or undecided) students are
    * assigned to without participating in the round-robin counter. When
    * omitted, non-consented students fall into the legacy nonConsented
-   * counter bucket.
+   * counter bucket. When set, it MUST match one of the keys in `groups`;
+   * otherwise the helper throws to prevent silent ghost-group assignments.
    */
   defaultGroupKey?: string;
   callerUserId: string;
@@ -45,6 +46,14 @@ export async function chooseGroupBalanced(
 ): Promise<ChooseGroupBalancedResult> {
   if (args.groups.length === 0) {
     throw new Error("balanced randomizer requires non-empty groups array");
+  }
+  if (
+    args.defaultGroupKey &&
+    !args.groups.some((g) => g.key === args.defaultGroupKey)
+  ) {
+    throw new Error(
+      `defaultGroupKey "${args.defaultGroupKey}" does not match any key in groups[]`
+    );
   }
   const bucket = await args.resolveBucket({
     consentItemId: args.consentItemId,
@@ -90,6 +99,14 @@ export function validateRandomizerPayload(payload: any): string | null {
       payload.defaultGroupKey.length === 0
     ) {
       return "randomizer.payload.defaultGroupKey must be a non-empty string";
+    }
+    if (
+      Array.isArray(payload.groups) &&
+      !payload.groups.some(
+        (g: any) => g && g.key === payload.defaultGroupKey
+      )
+    ) {
+      return "randomizer.payload.defaultGroupKey must reference an existing group key";
     }
   }
   return null;
