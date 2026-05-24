@@ -26,6 +26,7 @@ import {
   listCourseInstructors,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import { validateRandomizerPayload } from "./balanced";
 
 const COURSE_TABLE = process.env.COURSE_TABLE_NAME!;
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
@@ -295,9 +296,7 @@ function validatePayloadForType(type: string, payload: any): string | null {
         return `${type}.payload.markdown must be a string`;
       return null;
     case "randomizer":
-      if (payload.groups !== undefined && !Array.isArray(payload.groups))
-        return "randomizer.payload.groups must be an array";
-      return null;
+      return validateRandomizerPayload(payload);
     case "reveal_trigger":
       if (payload.targetItemIds !== undefined && !Array.isArray(payload.targetItemIds))
         return "reveal_trigger.payload.targetItemIds must be an array";

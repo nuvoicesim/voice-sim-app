@@ -50,3 +50,21 @@ export async function chooseGroupBalanced(
     count,
   };
 }
+
+export function validateRandomizerPayload(payload: any): string | null {
+  if (payload.groups !== undefined && !Array.isArray(payload.groups)) {
+    return "randomizer.payload.groups must be an array";
+  }
+  if (payload.strategy !== undefined) {
+    const allowed = ["uniform", "weighted", "balanced"];
+    if (!allowed.includes(payload.strategy)) {
+      return `randomizer.payload.strategy must be one of ${allowed.join(", ")}`;
+    }
+  }
+  if (payload.consentItemId !== undefined) {
+    if (typeof payload.consentItemId !== "string" || payload.consentItemId.length === 0) {
+      return "randomizer.payload.consentItemId must be a non-empty string";
+    }
+  }
+  return null;
+}
