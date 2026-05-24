@@ -60,6 +60,7 @@ import { moduleItemFunction } from "./functions/module-item-function/resource";
 import { surveyInstanceFunction } from "./functions/survey-instance-function/resource";
 import { eventLogFunction } from "./functions/event-log-function/resource";
 import { migrationFunction } from "./functions/migration-function/resource";
+import { moduleAssetFunction } from "./functions/module-asset-function/resource";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { type IGrantable, PolicyStatement } from "aws-cdk-lib/aws-iam";
@@ -90,6 +91,7 @@ const backend = defineBackend({
   surveyInstanceFunction,
   eventLogFunction,
   migrationFunction,
+  moduleAssetFunction,
 });
 
 const storageStack = backend.createStack("unity-storage-stack");
@@ -496,6 +498,7 @@ for (const fn of [
   backend.surveyInstanceFunction,
   backend.eventLogFunction,
   backend.migrationFunction,
+  backend.moduleAssetFunction,
 ]) {
   fn.addEnvironment("USER_POOL_ID", userPoolId);
   fn.resources.lambda.addToRolePolicy(
@@ -537,6 +540,19 @@ backend.unityBuildFunction.addEnvironment(
   unityBuildPublicBaseUrl
 );
 unityStorageBucket.grantReadWrite(backend.unityBuildFunction.resources.lambda);
+
+// module-asset-function — scoped to module-assets/* only (NOT bucket-wide)
+backend.moduleAssetFunction.addEnvironment("S3_BUCKET_NAME", s3BucketName);
+backend.moduleAssetFunction.addEnvironment(
+  "UNITY_BUILD_PUBLIC_BASE_URL",
+  unityBuildPublicBaseUrl
+);
+backend.moduleAssetFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
+    resources: [`${unityStorageBucket.bucketArn}/module-assets/*`],
+  })
+);
 
 // Configure LLM functions environment variables
 const defaultLlmAllowedOrigins = [
@@ -1018,6 +1034,18 @@ const adminPath = myRestApi.root.addResource("admin");
 const adminMigratePath = adminPath.addResource("migrate-to-courses");
 adminMigratePath.addMethod("GET", migrationLambdaIntegration, cognitoMethodOptions);
 adminMigratePath.addMethod("POST", migrationLambdaIntegration, cognitoMethodOptions);
+
+// /module-assets/upload-url
+const moduleAssetLambdaIntegration = new LambdaIntegration(
+  backend.moduleAssetFunction.resources.lambda
+);
+const moduleAssetsPath = myRestApi.root.addResource("module-assets");
+const moduleAssetsUploadUrlPath = moduleAssetsPath.addResource("upload-url");
+moduleAssetsUploadUrlPath.addMethod(
+  "POST",
+  moduleAssetLambdaIntegration,
+  cognitoMethodOptions
+);
 
 // add outputs to the configuration file
 backend.addOutput({
