@@ -232,7 +232,7 @@ function SubQuestionBody({
 
       {followUpQuestion?.prompt && (
         <Box>
-          <Text size="sm" fw={500} mb={4}>
+          <Text size="sm" fw={500} mb={4} style={{ whiteSpace: "pre-wrap" }}>
             {followUpQuestion.prompt}
           </Text>
           <Textarea

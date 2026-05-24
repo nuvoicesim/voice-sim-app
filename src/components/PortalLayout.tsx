@@ -2,7 +2,7 @@ import { Box, Stack, Text, Group, ThemeIcon } from '@mantine/core';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
-  IconLayoutDashboard, IconRocket, IconHistory,
+  IconLayoutDashboard, IconHistory,
   IconMovie, IconFilePlus, IconClipboardList, IconUsers, IconChartBar,
   IconUserCog, IconChartPie, IconUserStar, IconCloudUpload,
   IconBook, IconClipboardCheck, IconSchool, IconFileText,
@@ -20,7 +20,6 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
   student: [
     { label: 'Dashboard', path: '/student/dashboard', icon: IconLayoutDashboard },
     { label: 'Courses', path: '/student/courses', icon: IconBook },
-    { label: 'Assignments', path: '/student/assignments', icon: IconRocket },
     { label: 'History', path: '/student/history', icon: IconHistory },
   ],
   faculty: [
