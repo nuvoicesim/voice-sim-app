@@ -124,31 +124,23 @@ export default function StudentCourseDetailPage() {
     }
     if (missing.length === 0) return;
 
-    let cancelled = false;
-    Promise.all(
-      missing.map((id) =>
-        moduleItemApi
-          .getProgress(id, studentUserId)
-          .then(
-            (r: unknown) =>
-              [
-                id,
-                (r as { progress?: StudentItemProgress | null })?.progress || null,
-              ] as const
-          )
-          .catch(() => [id, null] as const)
-      )
-    ).then((entries) => {
-      if (cancelled) return;
-      setProgressByItem((prev) => {
-        const next = { ...prev };
-        for (const [id, val] of entries) next[id] = val;
-        return next;
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
+    // Fire each fetch independently so a re-run of this effect (triggered
+    // when itemsByModule grows as modules' items load incrementally) doesn't
+    // cancel in-flight fetches from a previous run. A previous design used a
+    // single Promise.all gated by an effect-scoped `cancelled` flag, which
+    // dropped progress for every module that loaded before the last one.
+    for (const id of missing) {
+      moduleItemApi
+        .getProgress(id, studentUserId)
+        .then((r: unknown) => {
+          const progress =
+            (r as { progress?: StudentItemProgress | null })?.progress || null;
+          setProgressByItem((prev) => ({ ...prev, [id]: progress }));
+        })
+        .catch(() => {
+          setProgressByItem((prev) => ({ ...prev, [id]: null }));
+        });
+    }
   }, [studentUserId, modules, itemsByModule]);
 
   const enrollment = enrollments.find(
