@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Textarea, Tabs, Box, Text } from "@mantine/core";
 import { marked } from "marked";
 import { highlightExtension } from "./markedHighlight";
+import { MarkdownToolbar } from "./MarkdownToolbar";
 
 marked.use(highlightExtension);
 
@@ -15,6 +16,7 @@ interface Props {
 
 export function MarkdownTextarea({ value, onChange, label, minRows = 6, placeholder }: Props) {
   const [tab, setTab] = useState<string>("write");
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const html = (() => {
     try {
       return marked.parse(value || "", { async: false, breaks: true, gfm: true }) as string;
@@ -35,12 +37,14 @@ export function MarkdownTextarea({ value, onChange, label, minRows = 6, placehol
           <Tabs.Tab value="preview">Preview</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="write" pt="xs">
+          <MarkdownToolbar textareaRef={taRef} value={value} onChange={onChange} />
           <Textarea
+            ref={taRef}
             value={value}
             onChange={(e) => onChange(e.currentTarget.value)}
             autosize
             minRows={minRows}
-            placeholder={placeholder || "Markdown supported. **bold**, *italic*, [links](url), - lists, # headings."}
+            placeholder={placeholder || "Markdown supported. **bold**, *italic*, ==highlight==, [links](url), - lists, # headings."}
           />
         </Tabs.Panel>
         <Tabs.Panel value="preview" pt="xs">
