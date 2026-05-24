@@ -9,7 +9,7 @@
 import { get, post, put, del } from "aws-amplify/api";
 import { fetchAuthSession } from "aws-amplify/auth";
 
-const API_NAME = "NurseTownAPI";
+const DEFAULT_API_NAME = "NurseTownAPI";
 
 function normalizePath(path: string): string {
   return path.startsWith("/") ? path.slice(1) : path;
@@ -130,11 +130,15 @@ async function toApiError(error: unknown): Promise<Error> {
   );
 }
 
-export async function apiGet<T = any>(path: string, queryParams?: Record<string, string>): Promise<T> {
+export async function apiGet<T = any>(
+  path: string,
+  queryParams?: Record<string, string>,
+  apiName: string = DEFAULT_API_NAME
+): Promise<T> {
   try {
     const headers = await getAuthHeaders();
     const restOperation = get({
-      apiName: API_NAME,
+      apiName,
       path: normalizePath(path),
       options: {
         headers,
@@ -151,12 +155,13 @@ export async function apiGet<T = any>(path: string, queryParams?: Record<string,
 export async function apiPost<T = any>(
   path: string,
   body: any,
-  extraHeaders: Record<string, string> = {}
+  extraHeaders: Record<string, string> = {},
+  apiName: string = DEFAULT_API_NAME
 ): Promise<T> {
   try {
     const authHeaders = await getAuthHeaders();
     const restOperation = post({
-      apiName: API_NAME,
+      apiName,
       path: normalizePath(path),
       options: {
         headers: {
@@ -177,12 +182,13 @@ export async function apiPost<T = any>(
 export async function apiPut<T = any>(
   path: string,
   body: any,
-  extraHeaders: Record<string, string> = {}
+  extraHeaders: Record<string, string> = {},
+  apiName: string = DEFAULT_API_NAME
 ): Promise<T> {
   try {
     const authHeaders = await getAuthHeaders();
     const restOperation = put({
-      apiName: API_NAME,
+      apiName,
       path: normalizePath(path),
       options: {
         headers: {
@@ -200,11 +206,14 @@ export async function apiPut<T = any>(
   }
 }
 
-export async function apiDelete<T = any>(path: string): Promise<T> {
+export async function apiDelete<T = any>(
+  path: string,
+  apiName: string = DEFAULT_API_NAME
+): Promise<T> {
   try {
     const headers = await getAuthHeaders();
     const restOperation = del({
-      apiName: API_NAME,
+      apiName,
       path: normalizePath(path),
       options: {
         headers,

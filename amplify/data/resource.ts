@@ -387,6 +387,8 @@ const schema = a.schema({
       bestSessionScore: a.float(),
       // For itemType=ai_detection: list of assignmentItemIds with sub-question unlocked.
       unlockedSubKeys: a.json(),
+      // For itemType=external_link: student-uploaded screenshot URLs (max 2).
+      submissionImageUrls: a.json(),
       createdAt: a.string().required(),
       updatedAt: a.string().required(),
     })

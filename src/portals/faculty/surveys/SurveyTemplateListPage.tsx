@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import {
+  ActionIcon,
   Box,
   Button,
   Card,
@@ -14,14 +15,16 @@ import {
   Textarea,
   ThemeIcon,
 } from "@mantine/core";
-import { IconPlus, IconClipboardCheck } from "@tabler/icons-react";
+import { IconPlus, IconClipboardCheck, IconTrash } from "@tabler/icons-react";
 import {
   fetchTemplates,
   selectTemplates,
   createTemplate,
+  deleteTemplate,
 } from "../../../slices/surveyTemplateSlice";
 import type { AppDispatch } from "../../../store";
 import { PageHeader, EmptyState } from "../../../components/design";
+import { notify } from "../../../utils/notify";
 
 export default function SurveyTemplateListPage() {
   const dispatch = useDispatch<AppDispatch>();
@@ -107,9 +110,28 @@ export default function SurveyTemplateListPage() {
                     </Text>
                   </Box>
                 </Group>
-                <Text size="xs" c="var(--claude-stone)">
-                  {new Date(t.updatedAt).toLocaleDateString()}
-                </Text>
+                <Group gap="sm" wrap="nowrap">
+                  <Text size="xs" c="var(--claude-stone)">
+                    {new Date(t.updatedAt).toLocaleDateString()}
+                  </Text>
+                  <ActionIcon
+                    color="terracotta"
+                    variant="subtle"
+                    aria-label="Delete template"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) return;
+                      try {
+                        await dispatch(deleteTemplate(t.surveyTemplateId)).unwrap();
+                        notify.success("Template deleted");
+                      } catch (err: any) {
+                        notify.error(err?.message || "unknown error", "Failed to delete template");
+                      }
+                    }}
+                  >
+                    <IconTrash size={14} />
+                  </ActionIcon>
+                </Group>
               </Group>
             </Card>
           ))}

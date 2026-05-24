@@ -33,6 +33,7 @@ import {
   CognitoUserPoolsAuthorizer,
   Cors,
   LambdaIntegration,
+  ResponseType,
   RestApi,
 } from "aws-cdk-lib/aws-apigateway";
 import { Distribution, PriceClass, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
@@ -60,6 +61,7 @@ import { moduleItemFunction } from "./functions/module-item-function/resource";
 import { surveyInstanceFunction } from "./functions/survey-instance-function/resource";
 import { eventLogFunction } from "./functions/event-log-function/resource";
 import { migrationFunction } from "./functions/migration-function/resource";
+import { moduleAssetFunction } from "./functions/module-asset-function/resource";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { type IGrantable, PolicyStatement } from "aws-cdk-lib/aws-iam";
@@ -90,6 +92,7 @@ const backend = defineBackend({
   surveyInstanceFunction,
   eventLogFunction,
   migrationFunction,
+  moduleAssetFunction,
 });
 
 const storageStack = backend.createStack("unity-storage-stack");
@@ -276,6 +279,11 @@ studentGroupAssignmentTable.grantReadData(backend.courseFunction.resources.lambd
 backend.courseFunction.addEnvironment(
   "STUDENT_GROUP_ASSIGNMENT_TABLE_NAME",
   studentGroupAssignmentTable.tableName
+);
+studentItemProgressTable.grantReadData(backend.courseFunction.resources.lambda);
+backend.courseFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
 );
 attachCourseAuthEnv(backend.courseFunction);
 backend.courseFunction.resources.lambda.addToRolePolicy(
@@ -476,6 +484,7 @@ backend.cognitoUserFunction.resources.lambda.addToRolePolicy(
       "cognito-idp:AdminGetUser",
       "cognito-idp:AdminSetUserPassword",
       "cognito-idp:AdminUpdateUserAttributes",
+      "cognito-idp:AdminUserGlobalSignOut",
       "cognito-idp:ListUsers",
     ],
     resources: [userPool.userPoolArn],
@@ -496,6 +505,7 @@ for (const fn of [
   backend.surveyInstanceFunction,
   backend.eventLogFunction,
   backend.migrationFunction,
+  backend.moduleAssetFunction,
 ]) {
   fn.addEnvironment("USER_POOL_ID", userPoolId);
   fn.resources.lambda.addToRolePolicy(
@@ -537,6 +547,23 @@ backend.unityBuildFunction.addEnvironment(
   unityBuildPublicBaseUrl
 );
 unityStorageBucket.grantReadWrite(backend.unityBuildFunction.resources.lambda);
+
+// module-asset-function — scoped to module-assets/* (faculty rich-text uploads)
+// and module-submissions/* (student external-link screenshots) only (NOT bucket-wide)
+backend.moduleAssetFunction.addEnvironment("S3_BUCKET_NAME", s3BucketName);
+backend.moduleAssetFunction.addEnvironment(
+  "UNITY_BUILD_PUBLIC_BASE_URL",
+  unityBuildPublicBaseUrl
+);
+backend.moduleAssetFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
+    resources: [
+      `${unityStorageBucket.bucketArn}/module-assets/*`,
+      `${unityStorageBucket.bucketArn}/module-submissions/*`,
+    ],
+  })
+);
 
 // Configure LLM functions environment variables
 const defaultLlmAllowedOrigins = [
@@ -1019,6 +1046,64 @@ const adminMigratePath = adminPath.addResource("migrate-to-courses");
 adminMigratePath.addMethod("GET", migrationLambdaIntegration, cognitoMethodOptions);
 adminMigratePath.addMethod("POST", migrationLambdaIntegration, cognitoMethodOptions);
 
+// ─── ModuleAssetAPI ──────────────────────────────────────────────────────
+// /module-assets/upload-url lives on its OWN RestApi in its OWN CloudFormation
+// stack because the main NurseTownAPI stack is at the 500-resource CFN limit.
+// This isolation also means future module-asset endpoints can grow without
+// pressuring the legacy stack.
+const moduleAssetStack = backend.createStack("module-asset-api-stack");
+
+const moduleAssetRestApi = new RestApi(moduleAssetStack, "ModuleAssetRestApi", {
+  restApiName: "ModuleAssetAPI",
+  deploy: true,
+  deployOptions: {
+    stageName: process.env.AMPLIFY_ENV || "dev",
+  },
+  defaultCorsPreflightOptions: {
+    allowOrigins: Cors.ALL_ORIGINS,
+    allowMethods: Cors.ALL_METHODS,
+    allowHeaders: [...Cors.DEFAULT_HEADERS, "X-Request-ID"],
+  },
+});
+
+const moduleAssetAuthorizer = new CognitoUserPoolsAuthorizer(
+  moduleAssetStack,
+  "ModuleAssetAuthorizer",
+  { cognitoUserPools: [backend.auth.resources.userPool] }
+);
+const moduleAssetCognitoMethodOptions = {
+  authorizationType: AuthorizationType.COGNITO,
+  authorizer: moduleAssetAuthorizer,
+};
+
+const moduleAssetLambdaIntegration = new LambdaIntegration(
+  backend.moduleAssetFunction.resources.lambda
+);
+const moduleAssetsPath = moduleAssetRestApi.root.addResource("module-assets");
+const moduleAssetsUploadUrlPath = moduleAssetsPath.addResource("upload-url");
+moduleAssetsUploadUrlPath.addMethod(
+  "POST",
+  moduleAssetLambdaIntegration,
+  moduleAssetCognitoMethodOptions
+);
+
+// CORS headers on auth-failure responses so the browser surfaces the real
+// 401/403 instead of an opaque CORS error.
+moduleAssetRestApi.addGatewayResponse("Default4XX", {
+  type: ResponseType.DEFAULT_4XX,
+  responseHeaders: {
+    "Access-Control-Allow-Origin": "'*'",
+    "Access-Control-Allow-Headers": "'*'",
+  },
+});
+moduleAssetRestApi.addGatewayResponse("Default5XX", {
+  type: ResponseType.DEFAULT_5XX,
+  responseHeaders: {
+    "Access-Control-Allow-Origin": "'*'",
+    "Access-Control-Allow-Headers": "'*'",
+  },
+});
+
 // add outputs to the configuration file
 backend.addOutput({
   custom: {
@@ -1027,6 +1112,11 @@ backend.addOutput({
         endpoint: myRestApi.url,
         region: Stack.of(myRestApi).region,
         apiName: myRestApi.restApiName,
+      },
+      [moduleAssetRestApi.restApiName]: {
+        endpoint: moduleAssetRestApi.url,
+        region: Stack.of(moduleAssetRestApi).region,
+        apiName: moduleAssetRestApi.restApiName,
       },
     },
     UnityStorage: {

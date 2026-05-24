@@ -179,6 +179,21 @@ export default function ModuleItemEditorPage() {
     return Array.from(set);
   })();
 
+  const consentItems = (() => {
+    const items: Array<{ value: string; label: string }> = [];
+    for (const list of Object.values(allItemsByModule || {})) {
+      for (const it of (list as any[]) || []) {
+        if (it.itemType === "consent") {
+          items.push({
+            value: it.moduleItemId,
+            label: it.title || it.moduleItemId,
+          });
+        }
+      }
+    }
+    return items;
+  })();
+
   const handleSave = async () => {
     if (!draft?.title?.trim()) {
       notify.warn("Item title cannot be empty");
@@ -254,7 +269,7 @@ export default function ModuleItemEditorPage() {
           <Text fw={600} mb="xs">
             Type-specific Configuration
           </Text>
-          <PayloadEditor draft={draft} setDraft={setDraft} />
+          <PayloadEditor draft={draft} setDraft={setDraft} consentItems={consentItems} />
         </Card>
 
         <Card withBorder>
@@ -280,7 +295,15 @@ export default function ModuleItemEditorPage() {
   );
 }
 
-function PayloadEditor({ draft, setDraft }: { draft: any; setDraft: (d: any) => void }) {
+function PayloadEditor({
+  draft,
+  setDraft,
+  consentItems,
+}: {
+  draft: any;
+  setDraft: (d: any) => void;
+  consentItems: Array<{ value: string; label: string }>;
+}) {
   const setPayload = (next: any) => setDraft({ ...draft, payload: { ...draft.payload, ...next } });
 
   switch (draft.itemType) {
@@ -294,7 +317,13 @@ function PayloadEditor({ draft, setDraft }: { draft: any; setDraft: (d: any) => 
     case "debrief":
       return <MarkdownPayloadEditor payload={draft.payload} onChange={setPayload} type={draft.itemType} />;
     case "randomizer":
-      return <RandomizerPayloadEditor payload={draft.payload} onChange={setPayload} />;
+      return (
+        <RandomizerPayloadEditor
+          payload={draft.payload}
+          onChange={setPayload}
+          consentItems={consentItems}
+        />
+      );
     case "ai_detection":
       return (
         <AIDetectionPayloadEditor
@@ -457,8 +486,18 @@ function MarkdownPayloadEditor({
   );
 }
 
-function RandomizerPayloadEditor({ payload, onChange }: { payload: any; onChange: (v: any) => void }) {
+function RandomizerPayloadEditor({
+  payload,
+  onChange,
+  consentItems,
+}: {
+  payload: any;
+  onChange: (v: any) => void;
+  consentItems: Array<{ value: string; label: string }>;
+}) {
   const groups: Array<{ key: string; label?: string; weight?: number }> = payload.groups || [];
+  const strategy = payload.strategy || "uniform";
+  const isBalanced = strategy === "balanced";
   return (
     <Stack gap="xs">
       <Select
@@ -466,10 +505,45 @@ function RandomizerPayloadEditor({ payload, onChange }: { payload: any; onChange
         data={[
           { value: "uniform", label: "Uniform random" },
           { value: "weighted", label: "Weighted" },
+          { value: "balanced", label: "Balanced (1:1 for consented students)" },
         ]}
-        value={payload.strategy || "uniform"}
-        onChange={(v) => onChange({ strategy: v })}
+        value={strategy}
+        onChange={(v) =>
+          onChange(
+            v === "balanced"
+              ? { strategy: v }
+              : { strategy: v, consentItemId: undefined, defaultGroupKey: undefined }
+          )
+        }
       />
+      {isBalanced && (
+        <>
+          <Select
+            label="Bind consent item"
+            placeholder="(none — treat all students as non-consented)"
+            clearable
+            data={consentItems}
+            value={payload.consentItemId || null}
+            onChange={(v) => onChange({ consentItemId: v || undefined })}
+          />
+          <Select
+            label="Default group for non-consented students"
+            description="Students who decline or have not yet decided land here without affecting the 1:1 counter."
+            placeholder="(none — use a separate non-consented round-robin bucket)"
+            clearable
+            data={groups.filter((g) => g.key).map((g) => ({ value: g.key, label: g.label || g.key }))}
+            value={payload.defaultGroupKey || null}
+            onChange={(v) => onChange({ defaultGroupKey: v || undefined })}
+          />
+          {payload.defaultGroupKey &&
+            !groups.some((g) => g.key === payload.defaultGroupKey) && (
+              <Alert color="orange">
+                Default group "{payload.defaultGroupKey}" no longer exists in this
+                randomizer's groups. Pick a new one or clear it before saving.
+              </Alert>
+            )}
+        </>
+      )}
       <Select
         label="Scope"
         data={[
@@ -504,18 +578,20 @@ function RandomizerPayloadEditor({ payload, onChange }: { payload: any; onChange
             }}
             style={{ flex: 1 }}
           />
-          <NumberInput
-            label="Weight"
-            value={g.weight ?? 1}
-            onChange={(v) => {
-              const next = [...groups];
-              next[i] = { ...next[i], weight: Number(v) || 1 };
-              onChange({ groups: next });
-            }}
-            min={0.1}
-            step={0.1}
-            style={{ width: 100 }}
-          />
+          {!isBalanced && (
+            <NumberInput
+              label="Weight"
+              value={g.weight ?? 1}
+              onChange={(v) => {
+                const next = [...groups];
+                next[i] = { ...next[i], weight: Number(v) || 1 };
+                onChange({ groups: next });
+              }}
+              min={0.1}
+              step={0.1}
+              style={{ width: 100 }}
+            />
+          )}
           <ActionIcon
             color="terracotta"
             variant="subtle"

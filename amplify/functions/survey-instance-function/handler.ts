@@ -91,7 +91,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     if (resource.endsWith("/submit") && method === "POST") {
       return await handleSubmit(caller!, pathParams.itemId);
     }
-    if (method === "GET") return await handleGet(caller!, pathParams.itemId);
+    if (method === "GET") {
+      const qs = event.queryStringParameters || {};
+      if (qs.studentUserId) {
+        return await handleGetForStudent(
+          caller!,
+          pathParams.itemId,
+          qs.studentUserId
+        );
+      }
+      return await handleGet(caller!, pathParams.itemId);
+    }
     if (method === "PUT") return await handleSaveAnswers(caller!, pathParams.itemId, event.body);
 
     return methodNotAllowedResponse(["GET", "PUT", "POST", "OPTIONS"]);
@@ -444,4 +454,29 @@ async function emitEvent(
   } catch (e) {
     console.warn("emitEvent failed", e);
   }
+}
+
+async function handleGetForStudent(
+  caller: any,
+  itemId: string,
+  studentUserId: string
+) {
+  const item = await getItem(
+    MODULE_ITEM_TABLE,
+    { moduleItemId: itemId },
+    dynamo
+  );
+  if (!item) return notFoundResponse("ModuleItem not found");
+  if (item.itemType !== "survey" && item.itemType !== "debrief") {
+    return badRequestResponse("ModuleItem is not a survey or debrief");
+  }
+  const authError = await requireCourseInstructor(caller, item.courseId, dynamo);
+  if (authError) return authError;
+
+  const instance = await getItem(
+    SURVEY_INSTANCE_TABLE,
+    { moduleItemId: itemId, studentUserId },
+    dynamo
+  );
+  return createResponse(HTTP_STATUS.OK, { instance: instance || null });
 }

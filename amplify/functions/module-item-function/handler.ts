@@ -1,5 +1,5 @@
 import type { APIGatewayProxyHandler } from "aws-lambda";
-import { ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, GetCommand, UpdateCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { createHash } from "crypto";
 import {
   createResponse,
@@ -26,6 +26,7 @@ import {
   listCourseInstructors,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import { chooseGroupBalanced, validateRandomizerPayload } from "./balanced";
 
 const COURSE_TABLE = process.env.COURSE_TABLE_NAME!;
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
@@ -42,6 +43,11 @@ const ASSIGNMENT_TABLE = process.env.ASSIGNMENT_TABLE_NAME!;
 const EVENT_LOG_TABLE = process.env.EVENT_LOG_TABLE_NAME!;
 const ENROLLMENT_TABLE = process.env.COURSE_ENROLLMENT_TABLE_NAME!;
 const CONSENT_DECISION_TABLE = process.env.CONSENT_DECISION_TABLE_NAME!;
+
+// Internal counters maintained by the balanced randomizer strategy on the
+// ModuleItem row itself. Underscore prefix marks them as not API-visible.
+const BALANCED_CONSENTED_COUNT_ATTR = "_balancedConsentedCount";
+const BALANCED_NONCONSENTED_COUNT_ATTR = "_balancedNonConsentedCount";
 
 const dynamo = createDynamoDbClient();
 
@@ -295,9 +301,7 @@ function validatePayloadForType(type: string, payload: any): string | null {
         return `${type}.payload.markdown must be a string`;
       return null;
     case "randomizer":
-      if (payload.groups !== undefined && !Array.isArray(payload.groups))
-        return "randomizer.payload.groups must be an array";
-      return null;
+      return validateRandomizerPayload(payload);
     case "reveal_trigger":
       if (payload.targetItemIds !== undefined && !Array.isArray(payload.targetItemIds))
         return "reveal_trigger.payload.targetItemIds must be an array";
@@ -457,10 +461,28 @@ async function handleUpdateProgress(caller: any, itemId: string, body: string | 
   if (accessError) return accessError;
 
   const payload = parseJsonBody(body);
-  const { state } = payload;
+  const { state, submissionImageUrls } = payload;
   const allowedStates = ["unlocked", "in_progress", "completed"];
   if (!allowedStates.includes(state)) {
     return badRequestResponse(`state must be one of: ${allowedStates.join(", ")}`);
+  }
+
+  let cleanedSubmissionImageUrls: string[] | undefined;
+  if (submissionImageUrls !== undefined) {
+    if (!Array.isArray(submissionImageUrls)) {
+      return badRequestResponse("submissionImageUrls must be an array of strings");
+    }
+    if (submissionImageUrls.length > 2) {
+      return badRequestResponse("submissionImageUrls may contain at most 2 URLs");
+    }
+    for (const url of submissionImageUrls) {
+      if (typeof url !== "string" || !url.startsWith("https://")) {
+        return badRequestResponse(
+          "submissionImageUrls entries must be https URLs"
+        );
+      }
+    }
+    cleanedSubmissionImageUrls = submissionImageUrls as string[];
   }
 
   const now = generateTimestamp();
@@ -479,6 +501,9 @@ async function handleUpdateProgress(caller: any, itemId: string, body: string | 
     updatedAt: now,
     createdAt: existing?.createdAt || now,
   };
+  if (cleanedSubmissionImageUrls !== undefined) {
+    next.submissionImageUrls = cleanedSubmissionImageUrls;
+  }
   if (state === "in_progress" && !existing?.startedAt) next.startedAt = now;
   if (state === "completed") {
     next.completedAt = now;
@@ -527,25 +552,74 @@ async function handleRandomize(caller: any, itemId: string) {
   const existing = await getItem(
     GROUP_TABLE,
     { courseId: item.courseId, "studentUserId#scopeKey": groupSortKey },
-    dynamo
+    dynamo,
+    { consistentRead: true }
   );
   if (existing) {
     return createResponse(HTTP_STATUS.OK, { assignment: existing, alreadyAssigned: true });
   }
 
-  // Weighted random.
-  const weights = groups.map((g) => Math.max(0, g.weight ?? 1));
-  const total = weights.reduce((a, b) => a + b, 0);
-  let pick = Math.random() * total;
-  let chosenIndex = 0;
-  for (let i = 0; i < weights.length; i++) {
-    pick -= weights[i];
-    if (pick <= 0) {
-      chosenIndex = i;
-      break;
+  let groupKey: string;
+  // Set only when the balanced strategy actually incremented a counter, so
+  // that on a putItem failure below we know which counter to compensate.
+  let balancedCounterAttr: string | null = null;
+  if (item.payload?.strategy === "balanced") {
+    const consentItemId: string | undefined = item.payload?.consentItemId;
+    const defaultGroupKey: string | undefined = item.payload?.defaultGroupKey;
+    const balancedResult = await chooseGroupBalanced({
+      groups: groups.map((g) => ({ key: g.key })),
+      consentItemId,
+      defaultGroupKey,
+      callerUserId: caller.userId,
+      itemId,
+      resolveBucket: async ({ consentItemId: cid, callerUserId }) => {
+        if (!cid) return "nonConsented";
+        const decision = await getItem(
+          CONSENT_DECISION_TABLE,
+          { consentItemId: cid, studentUserId: callerUserId },
+          dynamo
+        );
+        return decision?.decision === "agreed" ? "consented" : "nonConsented";
+      },
+      incrementCounter: async ({ itemId: id, bucket }) => {
+        const attr =
+          bucket === "consented"
+            ? BALANCED_CONSENTED_COUNT_ATTR
+            : BALANCED_NONCONSENTED_COUNT_ATTR;
+        const result = await dynamo.send(
+          new UpdateCommand({
+            TableName: MODULE_ITEM_TABLE,
+            Key: { moduleItemId: id },
+            UpdateExpression: "ADD #c :one",
+            ExpressionAttributeNames: { "#c": attr },
+            ExpressionAttributeValues: { ":one": 1 },
+            ReturnValues: "UPDATED_NEW",
+          })
+        );
+        const newValue = result.Attributes?.[attr];
+        if (typeof newValue !== "number") {
+          throw new Error("balanced counter increment returned non-numeric value");
+        }
+        balancedCounterAttr = attr;
+        return newValue;
+      },
+    });
+    groupKey = balancedResult.groupKey;
+  } else {
+    // Weighted / uniform random (existing behavior).
+    const weights = groups.map((g) => Math.max(0, g.weight ?? 1));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let pick = Math.random() * total;
+    let chosenIndex = 0;
+    for (let i = 0; i < weights.length; i++) {
+      pick -= weights[i];
+      if (pick <= 0) {
+        chosenIndex = i;
+        break;
+      }
     }
+    groupKey = groups[chosenIndex].key;
   }
-  const groupKey = groups[chosenIndex].key;
   const now = generateTimestamp();
   const row = {
     courseId: item.courseId,
@@ -559,7 +633,57 @@ async function handleRandomize(caller: any, itemId: string) {
     createdAt: now,
     updatedAt: now,
   };
-  await putItem(GROUP_TABLE, row, dynamo);
+  // Conditional put: a parallel request from the same student (double-tap,
+  // retry storm) may have inserted the assignment between our existing-row
+  // check and this write. If the put fails for any reason and we had
+  // incremented the balanced counter, compensate it so the strict 1:1
+  // property is preserved for the next arrivals. On a confirmed collision,
+  // return the winning row instead of an error.
+  try {
+    await dynamo.send(
+      new PutCommand({
+        TableName: GROUP_TABLE,
+        Item: row,
+        ConditionExpression:
+          "attribute_not_exists(courseId) AND attribute_not_exists(#sk)",
+        ExpressionAttributeNames: { "#sk": "studentUserId#scopeKey" },
+      })
+    );
+  } catch (putErr: any) {
+    if (balancedCounterAttr) {
+      try {
+        await dynamo.send(
+          new UpdateCommand({
+            TableName: MODULE_ITEM_TABLE,
+            Key: { moduleItemId: itemId },
+            UpdateExpression: "ADD #c :neg",
+            ExpressionAttributeNames: { "#c": balancedCounterAttr },
+            ExpressionAttributeValues: { ":neg": -1 },
+          })
+        );
+      } catch (compErr) {
+        console.error(
+          "compensating decrement of balanced counter failed",
+          compErr
+        );
+      }
+    }
+    if (putErr?.name === "ConditionalCheckFailedException") {
+      const winner = await getItem(
+        GROUP_TABLE,
+        { courseId: item.courseId, "studentUserId#scopeKey": groupSortKey },
+        dynamo,
+        { consistentRead: true }
+      );
+      if (winner) {
+        return createResponse(HTTP_STATUS.OK, {
+          assignment: winner,
+          alreadyAssigned: true,
+        });
+      }
+    }
+    throw putErr;
+  }
 
   // Mark progress completed for the randomizer item.
   const progressNow = {

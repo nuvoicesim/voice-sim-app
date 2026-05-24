@@ -8,7 +8,7 @@ import {
 import {
   IconRocket, IconHistory, IconCalendar,
   IconBook2, IconClipboardCheck, IconTrendingUp, IconChevronRight,
-  IconPlayerPlay, IconSparkles, IconTargetArrow,
+  IconSparkles, IconTargetArrow,
 } from '@tabler/icons-react';
 import { fetchAssignments, selectAssignments, selectAssignmentsLoading } from '../../slices/assignmentSlice';
 import { sessionApi } from '../../api/sessionApi';
@@ -157,15 +157,6 @@ export default function StudentDashboard() {
               <Text fw={500} size="md" c="var(--claude-near-black)">Upcoming Deadlines</Text>
             </Group>
           }
-          actions={
-            <Button
-              variant="subtle" size="xs" color="terracotta"
-              rightSection={<IconChevronRight size={14} />}
-              onClick={() => navigate('/student/assignments')}
-            >
-              View all
-            </Button>
-          }
         >
           {upcomingDue.length === 0 ? (
             <Center py="xl">
@@ -187,13 +178,8 @@ export default function StudentDashboard() {
                     radius="md" p="sm"
                     style={{
                       background: 'var(--claude-parchment)',
-                      cursor: 'pointer',
-                      transition: 'background 0.15s ease',
                       border: '1px solid var(--claude-border-cream)',
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--claude-border-cream)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--claude-parchment)'; }}
-                    onClick={() => navigate('/student/assignments')}
                   >
                     <Group justify="space-between" wrap="nowrap">
                       <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
@@ -301,67 +287,36 @@ export default function StudentDashboard() {
       </SimpleGrid>
 
       {/* ── Quick actions ── */}
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        <Paper
-          radius="lg" p="lg"
-          style={{
-            background: 'var(--claude-terracotta)',
-            cursor: 'pointer',
-            transition: 'box-shadow 0.15s ease, transform 0.15s ease',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta-hover)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = ''; }}
-          onClick={() => navigate('/student/assignments')}
-        >
-          <Group justify="space-between" align="center">
-            <Group gap="md">
-              <ThemeIcon size={48} radius="md" variant="filled" color="parchment.0">
-                <IconPlayerPlay size={24} color="var(--claude-terracotta)" />
-              </ThemeIcon>
-              <Box>
-                <Text fw={500} size="md" c="var(--claude-ivory)" style={{ fontFamily: 'Georgia, serif' }}>
-                  Start a Simulation
-                </Text>
-                <Text size="xs" c="rgba(250,249,245,0.85)">
-                  Browse and launch your assigned simulations
-                </Text>
-              </Box>
-            </Group>
-            <IconChevronRight size={20} style={{ color: 'rgba(250,249,245,0.85)' }} />
+      <Paper
+        radius="lg" p="lg"
+        style={{
+          background: 'var(--claude-ivory)',
+          cursor: 'pointer',
+          border: '1px solid var(--claude-border-cream)',
+          boxShadow: 'var(--claude-shadow-whisper)',
+          transition: 'box-shadow 0.15s ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
+        onClick={() => navigate('/student/history')}
+      >
+        <Group justify="space-between" align="center">
+          <Group gap="md">
+            <ThemeIcon size={48} radius="md" variant="light" color="terracotta">
+              <IconTrendingUp size={24} />
+            </ThemeIcon>
+            <Box>
+              <Text fw={500} size="md" c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
+                View Performance
+              </Text>
+              <Text size="xs" c="var(--claude-olive)">
+                Review past sessions and track your growth
+              </Text>
+            </Box>
           </Group>
-        </Paper>
-
-        <Paper
-          radius="lg" p="lg"
-          style={{
-            background: 'var(--claude-ivory)',
-            cursor: 'pointer',
-            border: '1px solid var(--claude-border-cream)',
-            boxShadow: 'var(--claude-shadow-whisper)',
-            transition: 'box-shadow 0.15s ease',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 1px var(--claude-terracotta)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--claude-shadow-whisper)'; }}
-          onClick={() => navigate('/student/history')}
-        >
-          <Group justify="space-between" align="center">
-            <Group gap="md">
-              <ThemeIcon size={48} radius="md" variant="light" color="terracotta">
-                <IconTrendingUp size={24} />
-              </ThemeIcon>
-              <Box>
-                <Text fw={500} size="md" c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
-                  View Performance
-                </Text>
-                <Text size="xs" c="var(--claude-olive)">
-                  Review past sessions and track your growth
-                </Text>
-              </Box>
-            </Group>
-            <IconChevronRight size={20} style={{ color: 'var(--claude-stone)' }} />
-          </Group>
-        </Paper>
-      </SimpleGrid>
+          <IconChevronRight size={20} style={{ color: 'var(--claude-stone)' }} />
+        </Group>
+      </Paper>
     </Stack>
   );
 }

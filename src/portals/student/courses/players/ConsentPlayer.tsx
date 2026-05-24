@@ -15,7 +15,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconCircleCheck, IconCircleX } from "@tabler/icons-react";
+import { IconArrowLeft, IconCircleCheck, IconCircleX } from "@tabler/icons-react";
 import {
   fetchMyConsent,
   selectMyConsentDecision,
@@ -157,15 +157,19 @@ export function ConsentPlayer({ item }: { item: any }) {
                 <Radio
                   value="agreed"
                   label={
-                    item.payload?.agreeLabel ||
-                    "I agree to participate in the research study."
+                    <span style={{ whiteSpace: "pre-wrap" }}>
+                      {item.payload?.agreeLabel ||
+                        "I agree to participate in the research study."}
+                    </span>
                   }
                 />
                 <Radio
                   value="declined"
                   label={
-                    item.payload?.declineLabel ||
-                    "I do not agree to participate in the research study."
+                    <span style={{ whiteSpace: "pre-wrap" }}>
+                      {item.payload?.declineLabel ||
+                        "I do not agree to participate in the research study."}
+                    </span>
                   }
                 />
               </Stack>
@@ -200,6 +204,18 @@ export function ConsentPlayer({ item }: { item: any }) {
             )}
           </Stack>
         </Card>
+      )}
+
+      {courseId && (
+        <Group justify="flex-start">
+          <Button
+            variant="default"
+            leftSection={<IconArrowLeft size={16} />}
+            onClick={() => navigate(`/student/courses/${courseId}`)}
+          >
+            Back to course
+          </Button>
+        </Group>
       )}
     </Stack>
   );

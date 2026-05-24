@@ -32,6 +32,8 @@ const COURSE_INSTRUCTOR_TABLE = process.env.COURSE_INSTRUCTOR_TABLE_NAME!;
 const COURSE_ENROLLMENT_TABLE = process.env.COURSE_ENROLLMENT_TABLE_NAME!;
 const STUDENT_GROUP_ASSIGNMENT_TABLE =
   process.env.STUDENT_GROUP_ASSIGNMENT_TABLE_NAME || "";
+const STUDENT_ITEM_PROGRESS_TABLE =
+  process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME || "";
 const USER_POOL_ID = process.env.USER_POOL_ID || "";
 
 const dynamo = createDynamoDbClient();
@@ -75,12 +77,18 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       }
     }
 
-    // ── Student's own group assignments for this course ──
+    // ── Group assignments for this course ──
+    //   ?all=true  → faculty view, all students (instructor-only)
+    //   default    → caller's own assignments (student or instructor; debug use)
     if (
       method === "GET" &&
       pathParams.courseId &&
       resource.endsWith("/courses/{courseId}/my-groups")
     ) {
+      const qs = event.queryStringParameters || {};
+      if (qs.all === "true") {
+        return await handleListGroupAssignments(caller!, pathParams.courseId);
+      }
       return await handleListMyGroups(caller!, pathParams.courseId);
     }
 
@@ -527,6 +535,31 @@ async function handleListMyGroups(caller: any, courseId: string) {
   return createResponse(HTTP_STATUS.OK, { groups });
 }
 
+async function handleListGroupAssignments(caller: any, courseId: string) {
+  if (!STUDENT_GROUP_ASSIGNMENT_TABLE) {
+    return createResponse(HTTP_STATUS.OK, { assignments: [] });
+  }
+  const authError = await requireCourseInstructor(caller, courseId, dynamo);
+  if (authError) return authError;
+
+  const result = await dynamo.send(
+    new ScanCommand({
+      TableName: STUDENT_GROUP_ASSIGNMENT_TABLE,
+      FilterExpression: "courseId = :c",
+      ExpressionAttributeValues: { ":c": courseId },
+    })
+  );
+  const assignments = (result.Items || []).map((row) => ({
+    courseId: row.courseId,
+    studentUserId: row.studentUserId,
+    scopeKey: row.scopeKey,
+    groupKey: row.groupKey,
+    assignedByItemId: row.assignedByItemId,
+    assignedAt: row.assignedAt,
+  }));
+  return createResponse(HTTP_STATUS.OK, { assignments });
+}
+
 // ───────────── Enrollments ─────────────
 
 async function handleListEnrollments(caller: any, courseId: string) {
@@ -541,7 +574,53 @@ async function handleListEnrollments(caller: any, courseId: string) {
       ExpressionAttributeValues: { ":c": courseId },
     })
   );
-  return createResponse(HTTP_STATUS.OK, { enrollments: result.Items || [] });
+  const enrollments = result.Items || [];
+
+  // Default courses bypass CourseEnrollment — any student who has engaged
+  // with content (StudentItemProgress row exists) is implicitly a student
+  // of the course. Surface them so faculty can see their progress.
+  //
+  // Note: an instruction item written via the `completed` path never sets
+  // startedAt/unlockedAt — only completedAt. So we accept any row and use
+  // whichever timestamp is available.
+  if (course.isDefault === true && STUDENT_ITEM_PROGRESS_TABLE) {
+    const knownIds = new Set(enrollments.map((e) => e.studentUserId));
+    const progressRes = await dynamo.send(
+      new ScanCommand({
+        TableName: STUDENT_ITEM_PROGRESS_TABLE,
+        FilterExpression: "courseId = :c",
+        ExpressionAttributeValues: { ":c": courseId },
+      })
+    );
+    const earliestByStudent: Record<string, string> = {};
+    for (const row of progressRes.Items || []) {
+      const sid = row.studentUserId;
+      if (!sid || knownIds.has(sid)) continue;
+      const ts =
+        row.unlockedAt ||
+        row.startedAt ||
+        row.completedAt ||
+        row.updatedAt ||
+        row.createdAt ||
+        "";
+      if (!earliestByStudent[sid] || (ts && ts < earliestByStudent[sid])) {
+        earliestByStudent[sid] = ts;
+      }
+    }
+    for (const [sid, enrolledAt] of Object.entries(earliestByStudent)) {
+      enrollments.push({
+        courseId,
+        studentUserId: sid,
+        studentEmail: null,
+        enrolledAt,
+        enrolledBy: null,
+        status: "active",
+        isImplicit: true,
+      });
+    }
+  }
+
+  return createResponse(HTTP_STATUS.OK, { enrollments });
 }
 
 async function handleAddEnrollment(caller: any, courseId: string, body: string | null) {

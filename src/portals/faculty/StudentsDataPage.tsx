@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Text, Stack, Paper, Box, Group, Center, Select,
   ThemeIcon, Skeleton, Badge, SimpleGrid, Button, RingProgress,
-  TextInput,
+  TextInput, Collapse, ActionIcon, Divider, Tooltip,
 } from '@mantine/core';
 import {
   IconUsers, IconInbox, IconSearch, IconChevronRight, IconArrowLeft,
   IconCalendar, IconCircleCheck, IconActivity, IconHash,
   IconClock, IconTrophy, IconStarFilled, IconMail, IconClipboardList,
+  IconChevronDown, IconDownload,
 } from '@tabler/icons-react';
 import { assignmentApi } from '../../api/assignmentApi';
 import { sessionApi } from '../../api/sessionApi';
@@ -34,6 +35,8 @@ interface StudentSummary {
   studentEmail?: string;
   totalAttempts: number;
   completedAttempts: number;
+  surveysStarted: number;
+  surveysSubmitted: number;
   latestDate: string;
   sessions: SessionRecord[];
 }
@@ -85,17 +88,31 @@ interface SurveyGroup {
   instances: SurveyInstanceRecord[];
 }
 
-function formatAnswer(q: SurveyQuestion, raw: any): string {
+const OTHER_VALUE = '__other__';
+const otherTextKey = (qId: string) => `${qId}__other_text`;
+
+function renderOtherLabel(q: SurveyQuestion, answers: Record<string, any>): string {
+  const base = q.config?.otherLabel || 'Other';
+  const txt = answers?.[otherTextKey(q.id)];
+  return txt && String(txt).trim().length > 0 ? `${base}: ${txt}` : base;
+}
+
+function formatAnswer(q: SurveyQuestion, raw: any, answers: Record<string, any> = {}): string {
   if (raw === undefined || raw === null || raw === '') return '—';
   if (q.type === 'likert') return String(raw);
   if (q.type === 'choice_single') {
+    if (raw === OTHER_VALUE) return renderOtherLabel(q, answers);
     const opt = q.config?.options?.find((o: any) => o.value === raw);
     return opt?.label ?? String(raw);
   }
   if (q.type === 'choice_multi') {
     if (!Array.isArray(raw) || raw.length === 0) return '—';
     return raw
-      .map((v) => q.config?.options?.find((o: any) => o.value === v)?.label ?? v)
+      .map((v) =>
+        v === OTHER_VALUE
+          ? renderOtherLabel(q, answers)
+          : q.config?.options?.find((o: any) => o.value === v)?.label ?? v
+      )
       .join(', ');
   }
   return String(raw);
@@ -134,9 +151,11 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
 function StudentCard({ student, onClick }: { student: StudentSummary; onClick: () => void }) {
   const email = student.studentEmail;
   const initial = (email || student.studentUserId).charAt(0).toUpperCase();
-  const rate = student.totalAttempts > 0
+  const hasSessions = student.totalAttempts > 0;
+  const rate = hasSessions
     ? Math.round((student.completedAttempts / student.totalAttempts) * 100)
     : 0;
+  const hasSurveys = student.surveysStarted > 0;
 
   return (
     <Paper
@@ -181,6 +200,14 @@ function StudentCard({ student, onClick }: { student: StudentSummary; onClick: (
                 <IconCircleCheck size={12} style={{ color: 'var(--claude-stone)' }} />
                 <Text size="xs" c="var(--claude-olive)">{student.completedAttempts} completed</Text>
               </Group>
+              {hasSurveys && (
+                <Group gap={4}>
+                  <IconClipboardList size={12} style={{ color: 'var(--claude-stone)' }} />
+                  <Text size="xs" c="var(--claude-olive)">
+                    {student.surveysSubmitted}/{student.surveysStarted} surveys
+                  </Text>
+                </Group>
+              )}
               <Group gap={4}>
                 <IconCalendar size={12} style={{ color: 'var(--claude-stone)' }} />
                 <Text size="xs" c="var(--claude-olive)">{formatRelativeDate(student.latestDate)}</Text>
@@ -190,9 +217,15 @@ function StudentCard({ student, onClick }: { student: StudentSummary; onClick: (
         </Group>
 
         <Group gap="sm" wrap="nowrap" style={{ flexShrink: 0 }}>
-          <Badge variant="light" color={rate >= 50 ? 'terracotta' : 'parchment'} size="sm" radius="xl">
-            {rate}% done
-          </Badge>
+          {hasSessions ? (
+            <Badge variant="light" color={rate >= 50 ? 'terracotta' : 'parchment'} size="sm" radius="xl">
+              {rate}% done
+            </Badge>
+          ) : (
+            <Badge variant="light" color="parchment" size="sm" radius="xl">
+              Survey only
+            </Badge>
+          )}
           <ThemeIcon size={28} radius="md" variant="light" color="parchment">
             <IconChevronRight size={14} />
           </ThemeIcon>
@@ -473,14 +506,58 @@ function StudentDetailView({
   );
 }
 
+function csvEscape(value: any): string {
+  const s = value === undefined || value === null ? '' : String(value);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function downloadSurveyCsv(survey: SurveyGroup, emailMap: Record<string, string>) {
+  const header = [
+    'Student',
+    'Status',
+    'Started At',
+    'Submitted At',
+    'Updated At',
+    ...survey.questions.map((q, i) => `Q${i + 1}: ${q.prompt}`),
+  ];
+  const lines = [header.map(csvEscape).join(',')];
+  for (const inst of survey.instances) {
+    const row = [
+      emailMap[inst.studentUserId] || inst.studentUserId,
+      inst.status,
+      inst.startedAt,
+      inst.submittedAt || '',
+      inst.updatedAt,
+      ...survey.questions.map((q) => formatAnswer(q, inst.answers[q.id], inst.answers)),
+    ];
+    lines.push(row.map(csvEscape).join(','));
+  }
+  const csv = lines.join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${survey.moduleItemTitle.replace(/[^a-z0-9-_]+/gi, '_') || 'survey'}_responses.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function SurveyOverviewSection({
   surveys,
   totalStudents,
+  emailMap,
 }: {
   surveys: SurveyGroup[];
   totalStudents: number;
+  emailMap: Record<string, string>;
 }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   if (surveys.length === 0) return null;
+
+  const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
+
   return (
     <SectionCard
       title={
@@ -488,7 +565,7 @@ function SurveyOverviewSection({
           <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
             <IconClipboardList size={14} />
           </ThemeIcon>
-          <Text fw={500} size="md" c="var(--claude-near-black)">Survey Completion</Text>
+          <Text fw={500} size="md" c="var(--claude-near-black)">Survey Responses</Text>
           <Badge variant="light" color="parchment" size="sm" radius="xl">{surveys.length}</Badge>
         </Group>
       }
@@ -498,6 +575,12 @@ function SurveyOverviewSection({
           const submitted = s.instances.filter((i) => i.status === 'submitted').length;
           const started = s.instances.length;
           const rate = totalStudents > 0 ? Math.round((submitted / totalStudents) * 100) : 0;
+          const isOpen = !!expanded[s.moduleItemId];
+          const sortedInstances = [...s.instances].sort((a, b) => {
+            const aT = a.submittedAt || a.updatedAt;
+            const bT = b.submittedAt || b.updatedAt;
+            return bT > aT ? 1 : -1;
+          });
           return (
             <Paper
               key={s.moduleItemId}
@@ -505,8 +588,13 @@ function SurveyOverviewSection({
               p="sm"
               style={{ background: 'var(--claude-parchment)', border: '1px solid var(--claude-border-cream)' }}
             >
-              <Group justify="space-between" wrap="nowrap">
-                <Box style={{ minWidth: 0 }}>
+              <Group
+                justify="space-between"
+                wrap="nowrap"
+                onClick={() => toggle(s.moduleItemId)}
+                style={{ cursor: 'pointer' }}
+              >
+                <Box style={{ minWidth: 0, flex: 1 }}>
                   <Group gap="xs">
                     <Text size="sm" fw={500} c="var(--claude-near-black)" lineClamp={1}>
                       {s.moduleItemTitle}
@@ -527,10 +615,96 @@ function SurveyOverviewSection({
                     </Text>
                   </Group>
                 </Box>
-                <Badge variant="light" color={rate >= 50 ? 'terracotta' : 'parchment'} size="sm" radius="xl">
-                  {rate}%
-                </Badge>
+                <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+                  <Badge variant="light" color={rate >= 50 ? 'terracotta' : 'parchment'} size="sm" radius="xl">
+                    {rate}%
+                  </Badge>
+                  <Tooltip label="Download CSV" withArrow>
+                    <ActionIcon
+                      variant="subtle"
+                      color="terracotta"
+                      size="md"
+                      radius="md"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadSurveyCsv(s, emailMap);
+                      }}
+                      disabled={s.instances.length === 0}
+                      aria-label="Download CSV"
+                    >
+                      <IconDownload size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <ThemeIcon size={26} radius="md" variant="light" color="parchment">
+                    <IconChevronDown
+                      size={14}
+                      style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+                    />
+                  </ThemeIcon>
+                </Group>
               </Group>
+
+              <Collapse in={isOpen}>
+                <Divider my="sm" />
+                {sortedInstances.length === 0 ? (
+                  <Text size="sm" c="var(--claude-stone)">No responses yet.</Text>
+                ) : (
+                  <Stack gap="sm">
+                    {sortedInstances.map((inst) => {
+                      const label = emailMap[inst.studentUserId] || inst.studentUserId;
+                      const ts = inst.submittedAt || inst.updatedAt;
+                      return (
+                        <Paper
+                          key={inst.surveyInstanceId || inst.studentUserId}
+                          radius="sm"
+                          p="sm"
+                          style={{ background: 'var(--claude-ivory)', border: '1px solid var(--claude-border-cream)' }}
+                        >
+                          <Group justify="space-between" wrap="nowrap" mb={6}>
+                            <Group gap={6} style={{ minWidth: 0 }}>
+                              <IconMail size={12} style={{ color: 'var(--claude-stone)' }} />
+                              <Text size="sm" fw={500} c="var(--claude-near-black)" lineClamp={1}>
+                                {label}
+                              </Text>
+                            </Group>
+                            <Group gap="xs" wrap="nowrap">
+                              <Badge
+                                size="xs"
+                                variant="light"
+                                color={inst.status === 'submitted' ? 'terracotta' : 'parchment'}
+                                radius="xl"
+                              >
+                                {inst.status === 'submitted' ? 'Submitted' : 'In progress'}
+                              </Badge>
+                              <Text size="xs" c="var(--claude-stone)">
+                                {ts ? new Date(ts).toLocaleString() : '—'}
+                              </Text>
+                            </Group>
+                          </Group>
+                          {s.questions.length === 0 ? (
+                            <Text size="sm" c="var(--claude-stone)">
+                              Schema unavailable — raw answers: {JSON.stringify(inst.answers)}
+                            </Text>
+                          ) : (
+                            <Stack gap={6}>
+                              {s.questions.map((q, idx) => (
+                                <Box key={q.id}>
+                                  <Text size="xs" c="var(--claude-olive)" fw={500}>
+                                    Q{idx + 1}. {q.prompt}
+                                  </Text>
+                                  <Text size="sm" c="var(--claude-near-black)" style={{ whiteSpace: 'pre-wrap' }}>
+                                    {formatAnswer(q, inst.answers[q.id], inst.answers)}
+                                  </Text>
+                                </Box>
+                              ))}
+                            </Stack>
+                          )}
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Collapse>
             </Paper>
           );
         })}
@@ -611,7 +785,7 @@ function StudentSurveyAnswers({
                         Q{idx + 1}. {q.prompt}
                       </Text>
                       <Text size="sm" c="var(--claude-near-black)" style={{ whiteSpace: 'pre-wrap' }}>
-                        {formatAnswer(q, instance.answers[q.id])}
+                        {formatAnswer(q, instance.answers[q.id], instance.answers)}
                       </Text>
                     </Box>
                   ))}
@@ -701,22 +875,45 @@ export default function StudentsDataPage() {
   }, []);
 
   const students = useMemo<StudentSummary[]>(() => {
-    const map = new Map<string, SessionRecord[]>();
+    const sessionMap = new Map<string, SessionRecord[]>();
     for (const s of sessions) {
-      const list = map.get(s.studentUserId) || [];
+      const list = sessionMap.get(s.studentUserId) || [];
       list.push(s);
-      map.set(s.studentUserId, list);
+      sessionMap.set(s.studentUserId, list);
     }
-    return Array.from(map.entries()).map(([userId, userSessions]) => ({
-      studentUserId: userId,
-      studentEmail: emailMap[userId],
-      totalAttempts: userSessions.length,
-      completedAttempts: userSessions.filter((s) => s.status === 'completed').length,
-      latestDate: userSessions.reduce((latest, s) =>
-        s.startedAt > latest ? s.startedAt : latest, userSessions[0].startedAt),
-      sessions: userSessions,
-    })).sort((a, b) => (b.latestDate > a.latestDate ? 1 : -1));
-  }, [sessions, emailMap]);
+
+    const surveyMap = new Map<string, { started: number; submitted: number; latestAt: string }>();
+    for (const g of surveys) {
+      for (const inst of g.instances) {
+        const entry = surveyMap.get(inst.studentUserId) || { started: 0, submitted: 0, latestAt: '' };
+        entry.started += 1;
+        if (inst.status === 'submitted') entry.submitted += 1;
+        const t = inst.submittedAt || inst.updatedAt;
+        if (t && t > entry.latestAt) entry.latestAt = t;
+        surveyMap.set(inst.studentUserId, entry);
+      }
+    }
+
+    const ids = new Set<string>([...sessionMap.keys(), ...surveyMap.keys()]);
+    return Array.from(ids).map((userId) => {
+      const userSessions = sessionMap.get(userId) || [];
+      const sv = surveyMap.get(userId) || { started: 0, submitted: 0, latestAt: '' };
+      const sessionLatest = userSessions.length > 0
+        ? userSessions.reduce((latest, s) => (s.startedAt > latest ? s.startedAt : latest), userSessions[0].startedAt)
+        : '';
+      const latestDate = sessionLatest > sv.latestAt ? sessionLatest : sv.latestAt;
+      return {
+        studentUserId: userId,
+        studentEmail: emailMap[userId],
+        totalAttempts: userSessions.length,
+        completedAttempts: userSessions.filter((s) => s.status === 'completed').length,
+        surveysStarted: sv.started,
+        surveysSubmitted: sv.submitted,
+        latestDate,
+        sessions: userSessions,
+      };
+    }).sort((a, b) => (b.latestDate > a.latestDate ? 1 : -1));
+  }, [sessions, surveys, emailMap]);
 
   const filteredStudents = useMemo(() => {
     if (!search.trim()) return students;
@@ -814,7 +1011,7 @@ export default function StudentsDataPage() {
           {surveysLoading ? (
             <Skeleton height={120} radius="lg" />
           ) : (
-            <SurveyOverviewSection surveys={surveys} totalStudents={uniqueStudents} />
+            <SurveyOverviewSection surveys={surveys} totalStudents={uniqueStudents} emailMap={emailMap} />
           )}
 
           {students.length > 0 && (

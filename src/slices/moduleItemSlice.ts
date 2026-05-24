@@ -134,6 +134,8 @@ export const { clearCurrentItem } = moduleItemSlice.actions;
 
 export const selectItemsByModule = (moduleId: string) => (s: any) =>
   (s.moduleItems.byModuleId[moduleId] as ModuleItem[]) || [];
+export const selectAllItemsByModuleId = (s: any) =>
+  s.moduleItems.byModuleId as Record<string, ModuleItem[]>;
 export const selectCurrentItem = (s: any) =>
   s.moduleItems.currentItem as ModuleItem | null;
 

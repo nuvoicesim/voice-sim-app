@@ -17,7 +17,6 @@ import {
   Select,
   ThemeIcon,
   TextInput,
-  Textarea,
   SimpleGrid,
 } from "@mantine/core";
 import {
@@ -51,6 +50,7 @@ import type { AppDispatch } from "../../../store";
 import type { ModuleItemType } from "../../../slices/moduleItemSlice";
 import { notify } from "../../../utils/notify";
 import { SortableList } from "../../../components/courses/SortableList";
+import { MarkdownTextarea } from "../../../components/courses/MarkdownTextarea";
 
 const TYPE_ICONS: Record<string, any> = {
   assignment: IconRocket,
@@ -276,13 +276,12 @@ export default function ModuleEditorPage() {
               onChange={(e) => setTitleDraft(e.currentTarget.value)}
               required
             />
-            <Textarea
+            <MarkdownTextarea
               label="Description (optional)"
-              placeholder="Short summary shown to students at the top of this module"
               value={descriptionDraft}
-              onChange={(e) => setDescriptionDraft(e.currentTarget.value)}
-              autosize
-              minRows={2}
+              onChange={(v) => setDescriptionDraft(v)}
+              minRows={3}
+              placeholder="Short summary shown to students at the top of this module. Markdown supported."
             />
             <Group justify="flex-end">
               <Button

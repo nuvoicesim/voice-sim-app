@@ -2,7 +2,7 @@ import { Box, Stack, Text, Group, ThemeIcon } from '@mantine/core';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
-  IconLayoutDashboard, IconRocket, IconHistory,
+  IconLayoutDashboard, IconHistory,
   IconMovie, IconFilePlus, IconClipboardList, IconUsers, IconChartBar,
   IconUserCog, IconChartPie, IconUserStar, IconCloudUpload,
   IconBook, IconClipboardCheck, IconSchool, IconFileText,
@@ -20,14 +20,11 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
   student: [
     { label: 'Dashboard', path: '/student/dashboard', icon: IconLayoutDashboard },
     { label: 'Courses', path: '/student/courses', icon: IconBook },
-    { label: 'Assignments', path: '/student/assignments', icon: IconRocket },
     { label: 'History', path: '/student/history', icon: IconHistory },
   ],
   faculty: [
     { label: 'Dashboard', path: '/faculty/dashboard', icon: IconLayoutDashboard },
     { label: 'Courses', path: '/faculty/courses', icon: IconBook },
-    { label: 'Survey Templates', path: '/faculty/surveys', icon: IconClipboardCheck },
-    { label: 'Create Assignment', path: '/faculty/assignments/new', icon: IconFilePlus },
     { label: 'Manage Assignments', path: '/faculty/assignments', icon: IconClipboardList },
     { label: 'Student Data', path: '/faculty/students', icon: IconUsers },
     { label: 'Analysis', path: '/faculty/analysis', icon: IconChartBar },
