@@ -170,6 +170,7 @@ function App() {
                   <Route path="courses/:courseId/modules/:moduleId" element={<ModuleEditorPage />} />
                   <Route path="courses/:courseId/modules/:moduleId/items/:itemId" element={<ModuleItemEditorPage />} />
                   <Route path="courses/:courseId/reviews" element={<CourseReviewBoardPage />} />
+                  <Route path="courses/:courseId/students/:studentUserId" element={<StudentCourseDetailPage />} />
                   <Route path="users" element={<UsersRolesPage />} />
                   <Route path="analytics" element={<GlobalAnalyticsPage />} />
                   <Route path="logs" element={<EventLogsPage />} />

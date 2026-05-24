@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import {
   Box,
@@ -23,8 +23,11 @@ import {
   fetchModules,
   selectModulesByCourse,
 } from "../../../slices/moduleSlice";
-import { fetchItems, type ModuleItem } from "../../../slices/moduleItemSlice";
-import type { RootState } from "../../../store";
+import {
+  fetchItems,
+  selectAllItemsByModuleId,
+  type ModuleItem,
+} from "../../../slices/moduleItemSlice";
 import { consentApi, type ConsentDecisionRow } from "../../../api/consentApi";
 import {
   groupAssignmentApi,
@@ -45,15 +48,12 @@ export default function StudentCourseDetailPage() {
   const course = useSelector(selectCurrentCourse);
   const enrollments = useSelector(selectCurrentEnrollments);
   const modules = useSelector(selectModulesByCourse(courseId || ""));
-  const itemsByModule = useSelector(
-    (s: RootState) =>
-      (s as unknown as { moduleItems: { byModuleId: Record<string, ModuleItem[]> } })
-        .moduleItems.byModuleId
-  );
+  const itemsByModule = useSelector(selectAllItemsByModuleId);
 
   const [consentDecisions, setConsentDecisions] = useState<ConsentDecisionRow[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<CourseGroupAssignmentRow[]>([]);
   const [progressByItem, setProgressByItem] = useState<Record<string, StudentItemProgress | null>>({});
+  const fetchedItemIdsRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,13 +111,15 @@ export default function StudentCourseDetailPage() {
 
   useEffect(() => {
     if (!studentUserId) return;
-    const allItemIds: string[] = [];
+    const missing: string[] = [];
     for (const m of modules) {
       for (const it of itemsByModule[m.moduleId] || []) {
-        allItemIds.push(it.moduleItemId);
+        if (!fetchedItemIdsRef.current.has(it.moduleItemId)) {
+          missing.push(it.moduleItemId);
+          fetchedItemIdsRef.current.add(it.moduleItemId);
+        }
       }
     }
-    const missing = allItemIds.filter((id) => !(id in progressByItem));
     if (missing.length === 0) return;
 
     let cancelled = false;
@@ -145,7 +147,11 @@ export default function StudentCourseDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [studentUserId, modules, itemsByModule, progressByItem]);
+  }, [studentUserId, modules, itemsByModule]);
+
+  if (!courseId || !studentUserId) {
+    return <Navigate to="/faculty/courses" replace />;
+  }
 
   const enrollment = enrollments.find(
     (e) => e.studentUserId === studentUserId
@@ -224,8 +230,8 @@ export default function StudentCourseDetailPage() {
                           <StudentModuleItemRow
                             key={it.moduleItemId}
                             item={it}
-                            studentUserId={studentUserId!}
-                            courseId={courseId!}
+                            studentUserId={studentUserId}
+                            courseId={courseId}
                             progress={progressByItem[it.moduleItemId]}
                             consentDecisions={consentDecisions}
                           />
