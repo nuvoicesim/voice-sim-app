@@ -33,6 +33,7 @@ import {
   CognitoUserPoolsAuthorizer,
   Cors,
   LambdaIntegration,
+  ResponseType,
   RestApi,
 } from "aws-cdk-lib/aws-apigateway";
 import { Distribution, PriceClass, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
@@ -1041,11 +1042,39 @@ const moduleAssetLambdaIntegration = new LambdaIntegration(
 );
 const moduleAssetsPath = myRestApi.root.addResource("module-assets");
 const moduleAssetsUploadUrlPath = moduleAssetsPath.addResource("upload-url");
+// Explicit OPTIONS preflight. The RestApi has defaultCorsPreflightOptions,
+// but inheritance to nested resources added late can be flaky depending on
+// CDK version — wire it directly so the route is guaranteed to respond to
+// preflight without invoking the Lambda.
+moduleAssetsUploadUrlPath.addCorsPreflight({
+  allowOrigins: Cors.ALL_ORIGINS,
+  allowMethods: ["POST", "OPTIONS"],
+  allowHeaders: [...Cors.DEFAULT_HEADERS, "X-Request-ID"],
+});
 moduleAssetsUploadUrlPath.addMethod(
   "POST",
   moduleAssetLambdaIntegration,
   cognitoMethodOptions
 );
+
+// Default GatewayResponses for auth failures (401) and missing-route (403)
+// must include CORS headers, otherwise the browser reports them as opaque
+// CORS errors instead of surfacing the real 401/403. This applies to ALL
+// endpoints on the RestApi.
+myRestApi.addGatewayResponse("Default4XX", {
+  type: ResponseType.DEFAULT_4XX,
+  responseHeaders: {
+    "Access-Control-Allow-Origin": "'*'",
+    "Access-Control-Allow-Headers": "'*'",
+  },
+});
+myRestApi.addGatewayResponse("Default5XX", {
+  type: ResponseType.DEFAULT_5XX,
+  responseHeaders: {
+    "Access-Control-Allow-Origin": "'*'",
+    "Access-Control-Allow-Headers": "'*'",
+  },
+});
 
 // add outputs to the configuration file
 backend.addOutput({
