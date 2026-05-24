@@ -1,9 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef } from 'react';
 import { MarkdownToolbar } from './MarkdownToolbar';
 import { MantineTestWrapper } from '../../test-utils/renderWithMantine';
+
+vi.mock('./useMarkdownImageUpload', () => ({
+  useMarkdownImageUpload: () => ({
+    upload: vi.fn().mockResolvedValue({
+      publicUrl: 'https://cdn.example/x.png',
+      alt: 'x',
+    }),
+    uploading: false,
+    error: null,
+  }),
+}));
 
 function Harness({
   initial,
@@ -157,5 +168,28 @@ describe('MarkdownToolbar — Heading', () => {
     await user.click(screen.getByRole('button', { name: /heading/i }));
 
     expect(onChange).toHaveBeenCalledWith('one\n# two\nthree');
+  });
+});
+
+describe('MarkdownToolbar — Image', () => {
+  it('inserts ![alt](url) at cursor after upload completes', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial="before  after" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 7, 7); // cursor between two spaces
+
+    const file = new File(
+      [new Blob([new ArrayBuffer(2048)], { type: 'image/png' })],
+      'x.png',
+      { type: 'image/png' }
+    );
+
+    const fileInput = screen.getByTestId('markdown-image-input') as HTMLInputElement;
+    await user.upload(fileInput, file);
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith('before ![x](https://cdn.example/x.png) after');
+    });
   });
 });

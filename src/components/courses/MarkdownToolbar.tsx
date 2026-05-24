@@ -1,6 +1,7 @@
 import { Group, ActionIcon, Tooltip } from "@mantine/core";
-import { IconBold, IconItalic, IconHighlight, IconLink, IconList, IconHeading } from "@tabler/icons-react";
-import { useCallback } from "react";
+import { IconBold, IconItalic, IconHighlight, IconLink, IconList, IconHeading, IconPhoto } from "@tabler/icons-react";
+import { useCallback, useRef } from "react";
+import { useMarkdownImageUpload } from "./useMarkdownImageUpload";
 
 interface Props {
   textareaRef: React.RefObject<HTMLTextAreaElement>;
@@ -28,6 +29,9 @@ function wrapSelection(
 }
 
 export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { upload, uploading } = useMarkdownImageUpload();
+
   const handleBold = useCallback(() => {
     onChange(wrapSelection(value, textareaRef.current, "**", "**", "bold"));
   }, [value, onChange, textareaRef]);
@@ -88,6 +92,32 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
   const handleList = useCallback(() => prependCurrentLine("- "), [prependCurrentLine]);
   const handleHeading = useCallback(() => prependCurrentLine("# "), [prependCurrentLine]);
 
+  const handleImageButton = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so picking the same file twice re-fires
+    if (!file) return;
+    try {
+      const { publicUrl, alt } = await upload(file);
+      const ta = textareaRef.current;
+      const insertion = `![${alt}](${publicUrl})`;
+      if (!ta) {
+        onChange(value + insertion);
+        return;
+      }
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      onChange(value.slice(0, start) + insertion + value.slice(end));
+    } catch (err) {
+      // Hook already surfaces error state; toolbar stays silent here.
+      // eslint-disable-next-line no-console
+      console.error("image upload failed", err);
+    }
+  };
+
   return (
     <Group gap={4} mb={4}>
       <Tooltip label="Bold (Ctrl+B)">
@@ -120,6 +150,24 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
           <IconHeading size={14} />
         </ActionIcon>
       </Tooltip>
+      <Tooltip label={uploading ? "Uploading..." : "Insert image"}>
+        <ActionIcon
+          variant="subtle"
+          onClick={handleImageButton}
+          aria-label="Image"
+          loading={uploading}
+        >
+          <IconPhoto size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        style={{ display: "none" }}
+        data-testid="markdown-image-input"
+        onChange={handleImageSelected}
+      />
     </Group>
   );
 }
