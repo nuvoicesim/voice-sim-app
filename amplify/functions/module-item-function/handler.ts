@@ -544,9 +544,11 @@ async function handleRandomize(caller: any, itemId: string) {
   let balancedCounterAttr: string | null = null;
   if (item.payload?.strategy === "balanced") {
     const consentItemId: string | undefined = item.payload?.consentItemId;
+    const defaultGroupKey: string | undefined = item.payload?.defaultGroupKey;
     const balancedResult = await chooseGroupBalanced({
       groups: groups.map((g) => ({ key: g.key })),
       consentItemId,
+      defaultGroupKey,
       callerUserId: caller.userId,
       itemId,
       resolveBucket: async ({ consentItemId: cid, callerUserId }) => {
