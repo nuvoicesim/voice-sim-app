@@ -1036,33 +1036,57 @@ const adminMigratePath = adminPath.addResource("migrate-to-courses");
 adminMigratePath.addMethod("GET", migrationLambdaIntegration, cognitoMethodOptions);
 adminMigratePath.addMethod("POST", migrationLambdaIntegration, cognitoMethodOptions);
 
-// /module-assets/upload-url
+// ─── ModuleAssetAPI ──────────────────────────────────────────────────────
+// /module-assets/upload-url lives on its OWN RestApi in its OWN CloudFormation
+// stack because the main NurseTownAPI stack is at the 500-resource CFN limit.
+// This isolation also means future module-asset endpoints can grow without
+// pressuring the legacy stack.
+const moduleAssetStack = backend.createStack("module-asset-api-stack");
+
+const moduleAssetRestApi = new RestApi(moduleAssetStack, "ModuleAssetRestApi", {
+  restApiName: "ModuleAssetAPI",
+  deploy: true,
+  deployOptions: {
+    stageName: process.env.AMPLIFY_ENV || "dev",
+  },
+  defaultCorsPreflightOptions: {
+    allowOrigins: Cors.ALL_ORIGINS,
+    allowMethods: Cors.ALL_METHODS,
+    allowHeaders: [...Cors.DEFAULT_HEADERS, "X-Request-ID"],
+  },
+});
+
+const moduleAssetAuthorizer = new CognitoUserPoolsAuthorizer(
+  moduleAssetStack,
+  "ModuleAssetAuthorizer",
+  { cognitoUserPools: [backend.auth.resources.userPool] }
+);
+const moduleAssetCognitoMethodOptions = {
+  authorizationType: AuthorizationType.COGNITO,
+  authorizer: moduleAssetAuthorizer,
+};
+
 const moduleAssetLambdaIntegration = new LambdaIntegration(
   backend.moduleAssetFunction.resources.lambda
 );
-const moduleAssetsPath = myRestApi.root.addResource("module-assets");
+const moduleAssetsPath = moduleAssetRestApi.root.addResource("module-assets");
 const moduleAssetsUploadUrlPath = moduleAssetsPath.addResource("upload-url");
-// OPTIONS preflight is auto-added by the RestApi's defaultCorsPreflightOptions
-// (see RestApi construction above); calling addCorsPreflight here would
-// conflict with that and fail CDK synth.
 moduleAssetsUploadUrlPath.addMethod(
   "POST",
   moduleAssetLambdaIntegration,
-  cognitoMethodOptions
+  moduleAssetCognitoMethodOptions
 );
 
-// Default GatewayResponses for auth failures (401) and missing-route (403)
-// must include CORS headers, otherwise the browser reports them as opaque
-// CORS errors instead of surfacing the real 401/403. This applies to ALL
-// endpoints on the RestApi.
-myRestApi.addGatewayResponse("Default4XX", {
+// CORS headers on auth-failure responses so the browser surfaces the real
+// 401/403 instead of an opaque CORS error.
+moduleAssetRestApi.addGatewayResponse("Default4XX", {
   type: ResponseType.DEFAULT_4XX,
   responseHeaders: {
     "Access-Control-Allow-Origin": "'*'",
     "Access-Control-Allow-Headers": "'*'",
   },
 });
-myRestApi.addGatewayResponse("Default5XX", {
+moduleAssetRestApi.addGatewayResponse("Default5XX", {
   type: ResponseType.DEFAULT_5XX,
   responseHeaders: {
     "Access-Control-Allow-Origin": "'*'",
@@ -1078,6 +1102,11 @@ backend.addOutput({
         endpoint: myRestApi.url,
         region: Stack.of(myRestApi).region,
         apiName: myRestApi.restApiName,
+      },
+      [moduleAssetRestApi.restApiName]: {
+        endpoint: moduleAssetRestApi.url,
+        region: Stack.of(moduleAssetRestApi).region,
+        apiName: moduleAssetRestApi.restApiName,
       },
     },
     UnityStorage: {
