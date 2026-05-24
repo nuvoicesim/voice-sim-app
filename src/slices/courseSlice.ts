@@ -24,9 +24,10 @@ export interface CourseInstructor {
 export interface CourseEnrollment {
   courseId: string;
   studentUserId: string;
-  studentEmail?: string;
+  studentEmail?: string | null;
   enrolledAt: string;
   status: "active" | "removed";
+  isImplicit?: boolean;
 }
 
 interface CourseState {

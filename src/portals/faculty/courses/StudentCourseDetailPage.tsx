@@ -34,6 +34,7 @@ import {
   type CourseGroupAssignmentRow,
 } from "../../../api/groupAssignmentApi";
 import { moduleItemApi } from "../../../api/moduleItemApi";
+import { cognitoUserApi } from "../../../api/cognitoUserApi";
 import type { StudentItemProgress } from "../../../slices/studentProgressSlice";
 import { StudentSummaryCard } from "./components/StudentSummaryCard";
 import { StudentModuleItemRow } from "./components/StudentModuleItemRow";
@@ -54,6 +55,7 @@ export default function StudentCourseDetailPage() {
   const [groupAssignments, setGroupAssignments] = useState<CourseGroupAssignmentRow[]>([]);
   const [progressByItem, setProgressByItem] = useState<Record<string, StudentItemProgress | null>>({});
   const fetchedItemIdsRef = useRef<Set<string>>(new Set());
+  const [resolvedEmail, setResolvedEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,13 +151,33 @@ export default function StudentCourseDetailPage() {
     };
   }, [studentUserId, modules, itemsByModule]);
 
-  if (!courseId || !studentUserId) {
-    return <Navigate to="/faculty/courses" replace />;
-  }
-
   const enrollment = enrollments.find(
     (e) => e.studentUserId === studentUserId
   );
+
+  // Best-effort email resolution when the enrollment row carries no email
+  // (implicit students on default courses).
+  useEffect(() => {
+    if (!studentUserId) return;
+    if (enrollment?.studentEmail) return;
+    if (resolvedEmail) return;
+    let cancelled = false;
+    cognitoUserApi
+      .resolve([studentUserId])
+      .then((res) => {
+        if (cancelled) return;
+        const email = res.users?.[0]?.email ?? null;
+        if (email) setResolvedEmail(email);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [studentUserId, enrollment?.studentEmail, resolvedEmail]);
+
+  if (!courseId || !studentUserId) {
+    return <Navigate to="/faculty/courses" replace />;
+  }
 
   if (!course || !enrollment) {
     return (
@@ -184,7 +206,7 @@ export default function StudentCourseDetailPage() {
         </Group>
       </Anchor>
       <Title order={2} mb="md">
-        {enrollment.studentEmail || studentUserId} — {course.title}
+        {enrollment.studentEmail || resolvedEmail || studentUserId} — {course.title}
       </Title>
 
       <Stack gap="md">

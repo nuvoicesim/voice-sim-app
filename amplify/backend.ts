@@ -280,6 +280,11 @@ backend.courseFunction.addEnvironment(
   "STUDENT_GROUP_ASSIGNMENT_TABLE_NAME",
   studentGroupAssignmentTable.tableName
 );
+studentItemProgressTable.grantReadData(backend.courseFunction.resources.lambda);
+backend.courseFunction.addEnvironment(
+  "STUDENT_ITEM_PROGRESS_TABLE_NAME",
+  studentItemProgressTable.tableName
+);
 attachCourseAuthEnv(backend.courseFunction);
 backend.courseFunction.resources.lambda.addToRolePolicy(
   new PolicyStatement({

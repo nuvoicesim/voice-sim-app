@@ -73,6 +73,10 @@ import { SortableList } from "../../../components/courses/SortableList";
 import { notify } from "../../../utils/notify";
 import { cognitoUserApi } from "../../../api/cognitoUserApi";
 
+// Module-level cache of userId → email. Survives tab switches inside one page
+// session, so reopening the Student Progress tab is instant.
+const resolvedEmailCache: Record<string, string | null> = {};
+
 export default function CourseEditorPage() {
   const { courseId } = useParams<{ courseId: string }>();
   const dispatch = useDispatch<AppDispatch>();
@@ -399,11 +403,42 @@ function StudentsTab({ courseId, enrollments }: { courseId: string; enrollments:
   const navigate = useNavigate();
   const [newEmail, setNewEmail] = useState("");
   const [adding, setAdding] = useState(false);
+  const [resolvedEmails, setResolvedEmails] = useState<Record<string, string | null>>(
+    () => ({ ...resolvedEmailCache })
+  );
 
   useEffect(() => {
     dispatch(fetchCourseConsents(courseId));
     dispatch(fetchCourseGroups(courseId));
   }, [dispatch, courseId]);
+
+  // Resolve emails for any enrollment row that came back without one
+  // (implicit students of default courses).
+  useEffect(() => {
+    const missing = enrollments
+      .filter((e) => !e.studentEmail)
+      .map((e) => e.studentUserId)
+      .filter((id) => !(id in resolvedEmailCache));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    cognitoUserApi
+      .resolve(missing)
+      .then((res) => {
+        if (cancelled) return;
+        const patch: Record<string, string | null> = {};
+        for (const u of res.users || []) {
+          resolvedEmailCache[u.userId] = u.email;
+          patch[u.userId] = u.email;
+        }
+        setResolvedEmails((prev) => ({ ...prev, ...patch }));
+      })
+      .catch(() => {
+        // Best-effort. Failures leave rows showing the userId fallback.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enrollments]);
 
   const handleAdd = async () => {
     if (!newEmail.trim()) return;
@@ -482,6 +517,7 @@ function StudentsTab({ courseId, enrollments }: { courseId: string; enrollments:
                 key={e.studentUserId}
                 courseId={courseId}
                 enrollment={e}
+                resolvedEmail={resolvedEmails[e.studentUserId]}
                 onView={(sid) =>
                   navigate(`/faculty/courses/${courseId}/students/${sid}`)
                 }
@@ -496,18 +532,21 @@ function StudentsTab({ courseId, enrollments }: { courseId: string; enrollments:
 
 interface EnrollmentRow {
   studentUserId: string;
-  studentEmail?: string;
+  studentEmail?: string | null;
   enrolledAt: string;
   status: string;
+  isImplicit?: boolean;
 }
 
 function StudentProgressRow({
   courseId,
   enrollment,
+  resolvedEmail,
   onView,
 }: {
   courseId: string;
   enrollment: EnrollmentRow;
+  resolvedEmail?: string | null;
   onView: (studentUserId: string) => void;
 }) {
   const dispatch = useDispatch<AppDispatch>();
@@ -519,7 +558,8 @@ function StudentProgressRow({
   );
   const cb = consentBadgeProps(consent);
   const gb = groupBadgeProps(group);
-  const label = enrollment.studentEmail || enrollment.studentUserId;
+  const label =
+    enrollment.studentEmail || resolvedEmail || enrollment.studentUserId;
 
   return (
     <Table.Tr>
@@ -527,7 +567,14 @@ function StudentProgressRow({
         style={{ cursor: "pointer" }}
         onClick={() => onView(enrollment.studentUserId)}
       >
-        <Anchor component="span">{label}</Anchor>
+        <Group gap={6}>
+          <Anchor component="span">{label}</Anchor>
+          {enrollment.isImplicit && (
+            <Text size="xs" c="dimmed">
+              (auto)
+            </Text>
+          )}
+        </Group>
       </Table.Td>
       <Table.Td>
         <Badge color={cb.color} variant={cb.variant}>
@@ -549,28 +596,31 @@ function StudentProgressRow({
           >
             View detail
           </Button>
-          <ActionIcon
-            color="terracotta"
-            variant="subtle"
-            onClick={async () => {
-              try {
-                await dispatch(
-                  unenrollStudent({
-                    courseId,
-                    studentUserId: enrollment.studentUserId,
-                  })
-                ).unwrap();
-                notify.success("Student removed");
-              } catch (err: any) {
-                notify.error(
-                  err?.message || "unknown error",
-                  "Failed to remove student"
-                );
-              }
-            }}
-          >
-            <IconTrash size={14} />
-          </ActionIcon>
+          {!enrollment.isImplicit && (
+            <ActionIcon
+              color="terracotta"
+              variant="subtle"
+              onClick={async () => {
+                try {
+                  await dispatch(
+                    unenrollStudent({
+                      courseId,
+                      studentUserId: enrollment.studentUserId,
+                    })
+                  ).unwrap();
+                  notify.success("Student removed");
+                } catch (err: any) {
+                  notify.error(
+                    err?.message || "unknown error",
+                    "Failed to remove student"
+                  );
+                }
+              }}
+              title="Remove enrollment"
+            >
+              <IconTrash size={14} />
+            </ActionIcon>
+          )}
         </Group>
       </Table.Td>
     </Table.Tr>

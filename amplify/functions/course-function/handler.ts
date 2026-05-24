@@ -32,6 +32,8 @@ const COURSE_INSTRUCTOR_TABLE = process.env.COURSE_INSTRUCTOR_TABLE_NAME!;
 const COURSE_ENROLLMENT_TABLE = process.env.COURSE_ENROLLMENT_TABLE_NAME!;
 const STUDENT_GROUP_ASSIGNMENT_TABLE =
   process.env.STUDENT_GROUP_ASSIGNMENT_TABLE_NAME || "";
+const STUDENT_ITEM_PROGRESS_TABLE =
+  process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME || "";
 const USER_POOL_ID = process.env.USER_POOL_ID || "";
 
 const dynamo = createDynamoDbClient();
@@ -572,7 +574,45 @@ async function handleListEnrollments(caller: any, courseId: string) {
       ExpressionAttributeValues: { ":c": courseId },
     })
   );
-  return createResponse(HTTP_STATUS.OK, { enrollments: result.Items || [] });
+  const enrollments = result.Items || [];
+
+  // Default courses bypass CourseEnrollment — any student who has engaged
+  // with content (StudentItemProgress row exists) is implicitly a student
+  // of the course. Surface them so faculty can see their progress.
+  if (course.isDefault === true && STUDENT_ITEM_PROGRESS_TABLE) {
+    const knownIds = new Set(enrollments.map((e) => e.studentUserId));
+    const progressRes = await dynamo.send(
+      new ScanCommand({
+        TableName: STUDENT_ITEM_PROGRESS_TABLE,
+        FilterExpression: "courseId = :c",
+        ExpressionAttributeValues: { ":c": courseId },
+        ProjectionExpression: "studentUserId, unlockedAt, startedAt",
+      })
+    );
+    const earliestByStudent: Record<string, string> = {};
+    for (const row of progressRes.Items || []) {
+      const sid = row.studentUserId;
+      if (!sid || knownIds.has(sid)) continue;
+      const ts = row.startedAt || row.unlockedAt;
+      if (!ts) continue;
+      if (!earliestByStudent[sid] || ts < earliestByStudent[sid]) {
+        earliestByStudent[sid] = ts;
+      }
+    }
+    for (const [sid, enrolledAt] of Object.entries(earliestByStudent)) {
+      enrollments.push({
+        courseId,
+        studentUserId: sid,
+        studentEmail: null,
+        enrolledAt,
+        enrolledBy: null,
+        status: "active",
+        isImplicit: true,
+      });
+    }
+  }
+
+  return createResponse(HTTP_STATUS.OK, { enrollments });
 }
 
 async function handleAddEnrollment(caller: any, courseId: string, body: string | null) {

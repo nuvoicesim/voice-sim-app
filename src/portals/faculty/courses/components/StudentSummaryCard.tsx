@@ -5,9 +5,10 @@ import type { CourseGroupAssignmentRow } from "../../../../api/groupAssignmentAp
 interface Props {
   enrollment: {
     studentUserId: string;
-    studentEmail?: string;
+    studentEmail?: string | null;
     enrolledAt: string;
     status: string;
+    isImplicit?: boolean;
   };
   consentDecisions: ConsentDecisionRow[];
   groupAssignments: CourseGroupAssignmentRow[];
