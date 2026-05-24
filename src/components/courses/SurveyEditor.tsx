@@ -11,6 +11,7 @@ import {
   Select,
   NumberInput,
   Menu,
+  Switch,
 } from "@mantine/core";
 import {
   IconTrash,
@@ -94,6 +95,39 @@ export function SurveyEditor({ title, description, questions, onChange }: Survey
     onChange({ title, description, questions: next });
   };
 
+  const addQuestionMenu = (
+    <Menu shadow="md">
+      <Menu.Target>
+        <Button leftSection={<IconPlus size={14} />} variant="light" size="sm">
+          Add question
+        </Button>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Item leftSection={<IconChartBar size={16} />} onClick={() => handleAdd("likert")}>
+          Likert (1-7 scale)
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconCircleCheck size={16} />}
+          onClick={() => handleAdd("choice_single")}
+        >
+          Multiple choice (single)
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconChecklist size={16} />}
+          onClick={() => handleAdd("choice_multi")}
+        >
+          Multiple choice (multi)
+        </Menu.Item>
+        <Menu.Item
+          leftSection={<IconAlphabetLatin size={16} />}
+          onClick={() => handleAdd("free_text")}
+        >
+          Free text
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+
   return (
     <Stack gap="md">
       <TextInput
@@ -113,36 +147,7 @@ export function SurveyEditor({ title, description, questions, onChange }: Survey
       <Box>
         <Group justify="space-between" mb="xs">
           <Text fw={600}>Questions ({questions.length})</Text>
-          <Menu shadow="md">
-            <Menu.Target>
-              <Button leftSection={<IconPlus size={14} />} variant="light" size="sm">
-                Add question
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item leftSection={<IconChartBar size={16} />} onClick={() => handleAdd("likert")}>
-                Likert (1-7 scale)
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconCircleCheck size={16} />}
-                onClick={() => handleAdd("choice_single")}
-              >
-                Multiple choice (single)
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconChecklist size={16} />}
-                onClick={() => handleAdd("choice_multi")}
-              >
-                Multiple choice (multi)
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconAlphabetLatin size={16} />}
-                onClick={() => handleAdd("free_text")}
-              >
-                Free text
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
+          {addQuestionMenu}
         </Group>
 
         <SortableList
@@ -263,6 +268,39 @@ export function SurveyEditor({ title, description, questions, onChange }: Survey
                         >
                           Add option
                         </Button>
+                        <Group gap="sm" mt={4} align="center">
+                          <Switch
+                            size="sm"
+                            label='Allow "Other" (specify)'
+                            checked={!!q.config.allowOther}
+                            onChange={(e) =>
+                              handleQuestionUpdate(idx, (qq) => {
+                                if (qq.type !== "choice_single" && qq.type !== "choice_multi") return qq;
+                                return {
+                                  ...qq,
+                                  config: { ...qq.config, allowOther: e.currentTarget.checked },
+                                };
+                              })
+                            }
+                          />
+                          {q.config.allowOther && (
+                            <TextInput
+                              size="xs"
+                              placeholder='Label (default: "Other (specify)")'
+                              value={q.config.otherLabel ?? ""}
+                              onChange={(e) =>
+                                handleQuestionUpdate(idx, (qq) => {
+                                  if (qq.type !== "choice_single" && qq.type !== "choice_multi") return qq;
+                                  return {
+                                    ...qq,
+                                    config: { ...qq.config, otherLabel: e.currentTarget.value },
+                                  };
+                                })
+                              }
+                              style={{ flex: 1 }}
+                            />
+                          )}
+                        </Group>
                       </Stack>
                     )}
                     {q.type === "free_text" && (
@@ -309,6 +347,11 @@ export function SurveyEditor({ title, description, questions, onChange }: Survey
               No questions yet. Click "Add question" to start.
             </Text>
           </Card>
+        )}
+        {questions.length > 0 && (
+          <Group justify="center" mt="sm">
+            {addQuestionMenu}
+          </Group>
         )}
       </Box>
     </Stack>

@@ -14,7 +14,12 @@ export type SurveyQuestion =
       type: "choice_single" | "choice_multi";
       prompt: string;
       required: boolean;
-      config: { options: { value: string; label: string }[]; minSelected?: number };
+      config: {
+        options: { value: string; label: string }[];
+        minSelected?: number;
+        allowOther?: boolean;
+        otherLabel?: string;
+      };
     }
   | {
       id: string;
