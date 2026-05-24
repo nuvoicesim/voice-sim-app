@@ -128,6 +128,34 @@ describe('MarkdownToolbar — Link', () => {
 
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('rejects javascript: and data: URLs as a no-op', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(window, 'prompt').mockReturnValue('javascript:alert(1)');
+    render(<Harness initial="x" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 1);
+
+    await user.click(screen.getByRole('button', { name: /link/i }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('accepts http, https, mailto, tel, and relative URLs', async () => {
+    const user = userEvent.setup();
+    const allowed = ['https://x.test', 'http://x.test', 'mailto:a@b.test', 'tel:+15551234', '/relative/path', '#anchor'];
+    for (const url of allowed) {
+      const onChange = vi.fn();
+      vi.spyOn(window, 'prompt').mockReturnValue(url);
+      const { unmount } = render(<Harness initial="x" onChange={onChange} />);
+      const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+      setSelection(ta, 0, 1);
+      await user.click(screen.getByRole('button', { name: /link/i }));
+      expect(onChange).toHaveBeenCalledWith(`[x](${url})`);
+      unmount();
+    }
+  });
 });
 
 describe('MarkdownToolbar — List', () => {

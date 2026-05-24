@@ -46,7 +46,9 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
 
   const handleLink = useCallback(() => {
     const url = window.prompt("URL");
-    if (!url) return;
+    // Reject empty / cancelled, and any scheme that isn't safe to render.
+    // Allow http(s), mailto, tel, and relative URLs (starting with / or #).
+    if (!url || !/^(?:https?:|mailto:|tel:|[/#])/i.test(url.trim())) return;
     const ta = textareaRef.current;
     if (!ta) {
       onChange(value + `[link](${url})`);
