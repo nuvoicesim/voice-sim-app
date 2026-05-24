@@ -118,3 +118,44 @@ describe('MarkdownToolbar — Link', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe('MarkdownToolbar — List', () => {
+  it('prepends "- " to every selected line', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial={"apple\nbanana\ncherry"} onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    // select "apple\nbanana"
+    setSelection(ta, 0, 12);
+
+    await user.click(screen.getByRole('button', { name: /list/i }));
+
+    expect(onChange).toHaveBeenCalledWith('- apple\n- banana\ncherry');
+  });
+
+  it('prepends "- " to current line when nothing selected', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial={"one\ntwo\nthree"} onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 5, 5); // inside "two"
+
+    await user.click(screen.getByRole('button', { name: /list/i }));
+
+    expect(onChange).toHaveBeenCalledWith('one\n- two\nthree');
+  });
+});
+
+describe('MarkdownToolbar — Heading', () => {
+  it('prepends "# " to the current line', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial={"one\ntwo\nthree"} onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 5, 5); // inside "two"
+
+    await user.click(screen.getByRole('button', { name: /heading/i }));
+
+    expect(onChange).toHaveBeenCalledWith('one\n# two\nthree');
+  });
+});

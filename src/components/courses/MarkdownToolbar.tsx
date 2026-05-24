@@ -1,5 +1,5 @@
 import { Group, ActionIcon, Tooltip } from "@mantine/core";
-import { IconBold, IconItalic, IconHighlight, IconLink } from "@tabler/icons-react";
+import { IconBold, IconItalic, IconHighlight, IconLink, IconList, IconHeading } from "@tabler/icons-react";
 import { useCallback } from "react";
 
 interface Props {
@@ -56,6 +56,38 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
     );
   }, [value, onChange, textareaRef]);
 
+  const prependCurrentLine = useCallback(
+    (prefix: string) => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      if (start === end) {
+        const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+        onChange(
+          value.slice(0, lineStart) + prefix + value.slice(lineStart)
+        );
+        return;
+      }
+      // selection spans some range: split into lines covered by it and
+      // prefix each. We work from the line start before `start` to the
+      // line end at or after `end`.
+      const blockStart = value.lastIndexOf("\n", start - 1) + 1;
+      const block = value.slice(blockStart, end);
+      const prefixed = block
+        .split("\n")
+        .map((line) => prefix + line)
+        .join("\n");
+      onChange(
+        value.slice(0, blockStart) + prefixed + value.slice(end)
+      );
+    },
+    [value, onChange, textareaRef]
+  );
+
+  const handleList = useCallback(() => prependCurrentLine("- "), [prependCurrentLine]);
+  const handleHeading = useCallback(() => prependCurrentLine("# "), [prependCurrentLine]);
+
   return (
     <Group gap={4} mb={4}>
       <Tooltip label="Bold (Ctrl+B)">
@@ -76,6 +108,16 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
       <Tooltip label="Insert link">
         <ActionIcon variant="subtle" onClick={handleLink} aria-label="Link">
           <IconLink size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="List">
+        <ActionIcon variant="subtle" onClick={handleList} aria-label="List">
+          <IconList size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Heading">
+        <ActionIcon variant="subtle" onClick={handleHeading} aria-label="Heading">
+          <IconHeading size={14} />
         </ActionIcon>
       </Tooltip>
     </Group>
