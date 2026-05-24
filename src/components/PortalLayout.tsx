@@ -25,8 +25,6 @@ const NAV_ITEMS: Record<UserRole, NavItem[]> = {
   faculty: [
     { label: 'Dashboard', path: '/faculty/dashboard', icon: IconLayoutDashboard },
     { label: 'Courses', path: '/faculty/courses', icon: IconBook },
-    { label: 'Survey Templates', path: '/faculty/surveys', icon: IconClipboardCheck },
-    { label: 'Create Assignment', path: '/faculty/assignments/new', icon: IconFilePlus },
     { label: 'Manage Assignments', path: '/faculty/assignments', icon: IconClipboardList },
     { label: 'Student Data', path: '/faculty/students', icon: IconUsers },
     { label: 'Analysis', path: '/faculty/analysis', icon: IconChartBar },
