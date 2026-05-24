@@ -1,5 +1,5 @@
 import type { APIGatewayProxyHandler } from "aws-lambda";
-import { ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { createHash } from "crypto";
 import {
   createResponse,
@@ -26,7 +26,7 @@ import {
   listCourseInstructors,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
-import { validateRandomizerPayload } from "./balanced";
+import { chooseGroupBalanced, validateRandomizerPayload } from "./balanced";
 
 const COURSE_TABLE = process.env.COURSE_TABLE_NAME!;
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
@@ -532,19 +532,61 @@ async function handleRandomize(caller: any, itemId: string) {
     return createResponse(HTTP_STATUS.OK, { assignment: existing, alreadyAssigned: true });
   }
 
-  // Weighted random.
-  const weights = groups.map((g) => Math.max(0, g.weight ?? 1));
-  const total = weights.reduce((a, b) => a + b, 0);
-  let pick = Math.random() * total;
-  let chosenIndex = 0;
-  for (let i = 0; i < weights.length; i++) {
-    pick -= weights[i];
-    if (pick <= 0) {
-      chosenIndex = i;
-      break;
+  let groupKey: string;
+  if (item.payload?.strategy === "balanced") {
+    const consentItemId: string | undefined = item.payload?.consentItemId;
+    const balancedResult = await chooseGroupBalanced({
+      groups: groups.map((g) => ({ key: g.key })),
+      consentItemId,
+      callerUserId: caller.userId,
+      itemId,
+      resolveBucket: async ({ consentItemId: cid, callerUserId }) => {
+        if (!cid) return "nonConsented";
+        const decision = await getItem(
+          CONSENT_DECISION_TABLE,
+          { consentItemId: cid, studentUserId: callerUserId },
+          dynamo
+        );
+        return decision?.decision === "agreed" ? "consented" : "nonConsented";
+      },
+      incrementCounter: async ({ itemId: id, bucket }) => {
+        const attr =
+          bucket === "consented"
+            ? "_balancedConsentedCount"
+            : "_balancedNonConsentedCount";
+        const result = await dynamo.send(
+          new UpdateCommand({
+            TableName: MODULE_ITEM_TABLE,
+            Key: { moduleItemId: id },
+            UpdateExpression: "ADD #c :one",
+            ExpressionAttributeNames: { "#c": attr },
+            ExpressionAttributeValues: { ":one": 1 },
+            ReturnValues: "UPDATED_NEW",
+          })
+        );
+        const newValue = result.Attributes?.[attr];
+        if (typeof newValue !== "number") {
+          throw new Error("balanced counter increment returned non-numeric value");
+        }
+        return newValue;
+      },
+    });
+    groupKey = balancedResult.groupKey;
+  } else {
+    // Weighted / uniform random (existing behavior).
+    const weights = groups.map((g) => Math.max(0, g.weight ?? 1));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let pick = Math.random() * total;
+    let chosenIndex = 0;
+    for (let i = 0; i < weights.length; i++) {
+      pick -= weights[i];
+      if (pick <= 0) {
+        chosenIndex = i;
+        break;
+      }
     }
+    groupKey = groups[chosenIndex].key;
   }
-  const groupKey = groups[chosenIndex].key;
   const now = generateTimestamp();
   const row = {
     courseId: item.courseId,
