@@ -484,6 +484,7 @@ backend.cognitoUserFunction.resources.lambda.addToRolePolicy(
       "cognito-idp:AdminGetUser",
       "cognito-idp:AdminSetUserPassword",
       "cognito-idp:AdminUpdateUserAttributes",
+      "cognito-idp:AdminUserGlobalSignOut",
       "cognito-idp:ListUsers",
     ],
     resources: [userPool.userPoolArn],

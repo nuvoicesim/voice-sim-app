@@ -18,6 +18,7 @@ import {
   AdminGetUserCommand,
   AdminSetUserPasswordCommand,
   AdminUpdateUserAttributesCommand,
+  AdminUserGlobalSignOutCommand,
   ListUsersCommand,
   type AttributeType,
   type UserType,
@@ -283,6 +284,24 @@ async function handleUpdateRole(userId: string, body: string | null) {
     });
 
     await cognitoClient.send(command);
+
+    // Cognito attribute changes don't invalidate already-issued ID tokens —
+    // the new custom:role claim only appears after the user re-authenticates.
+    // Force a global sign-out so the next API call from that user is rejected
+    // and they are redirected to log in again, picking up the new role.
+    try {
+      await cognitoClient.send(
+        new AdminUserGlobalSignOutCommand({
+          UserPoolId: USER_POOL_ID,
+          Username: userId,
+        })
+      );
+    } catch (signOutErr) {
+      // Best-effort: log but don't fail the role update if sign-out errors.
+      // The role attribute is already changed; the user will pick up the new
+      // role on their next normal sign-in.
+      console.warn("AdminUserGlobalSignOut after role update failed", signOutErr);
+    }
 
     return createResponse(HTTP_STATUS.OK, {
       message: "Role updated successfully",
