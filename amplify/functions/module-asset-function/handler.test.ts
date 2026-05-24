@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { APIGatewayProxyEvent } from 'aws-lambda';
+import type {
+  APIGatewayProxyEvent,
+  APIGatewayProxyResult,
+  Context,
+} from 'aws-lambda';
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: vi.fn().mockResolvedValue('https://signed.example/upload?sig=x'),
@@ -27,80 +31,80 @@ function makeEvent(overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayPro
     queryStringParameters: null,
     multiValueQueryStringParameters: null,
     stageVariables: null,
-    requestContext: { authorizer: { claims: {} } } as any,
+    requestContext: { authorizer: { claims: {} } } as APIGatewayProxyEvent['requestContext'],
     ...overrides,
   } as APIGatewayProxyEvent;
+}
+
+const fakeContext = {} as Context;
+const noopCallback = () => {};
+
+async function runHandler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const res = await handler(event, fakeContext, noopCallback);
+  return res as APIGatewayProxyResult;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.S3_BUCKET_NAME = 'voice-sim-bucket';
   process.env.UNITY_BUILD_PUBLIC_BASE_URL = 'https://cdn.example.test';
-  (extractCallerIdentity as any).mockResolvedValue({ userId: 'sub-1', role: 'faculty' });
-  (requireRole as any).mockReturnValue(null);
+  vi.mocked(extractCallerIdentity).mockResolvedValue({ userId: 'sub-1', role: 'faculty' });
+  vi.mocked(requireRole).mockReturnValue(null);
 });
 
 describe('module-asset-function handler', () => {
   it('returns 400 when contentType is missing', async () => {
-    const res = await handler(
-      makeEvent({ body: JSON.stringify({ sizeBytes: 1024 }) }),
-      {} as any,
-      () => {}
+    const res = await runHandler(
+      makeEvent({ body: JSON.stringify({ sizeBytes: 1024 }) })
     );
-    expect((res as any).statusCode).toBe(400);
+    expect(res.statusCode).toBe(400);
   });
 
   it('returns 400 for unsupported contentType', async () => {
-    const res = await handler(
-      makeEvent({ body: JSON.stringify({ contentType: 'image/bmp', sizeBytes: 1024 }) }),
-      {} as any,
-      () => {}
+    const res = await runHandler(
+      makeEvent({ body: JSON.stringify({ contentType: 'image/bmp', sizeBytes: 1024 }) })
     );
-    expect((res as any).statusCode).toBe(400);
+    expect(res.statusCode).toBe(400);
   });
 
   it('returns 400 for sizeBytes above 5 MB', async () => {
-    const res = await handler(
+    const res = await runHandler(
       makeEvent({
         body: JSON.stringify({ contentType: 'image/png', sizeBytes: 6 * 1024 * 1024 }),
-      }),
-      {} as any,
-      () => {}
+      })
     );
-    expect((res as any).statusCode).toBe(400);
+    expect(res.statusCode).toBe(400);
   });
 
   it('returns 400 for zero or negative sizeBytes', async () => {
-    const res = await handler(
+    const res = await runHandler(
       makeEvent({
         body: JSON.stringify({ contentType: 'image/png', sizeBytes: 0 }),
-      }),
-      {} as any,
-      () => {}
+      })
     );
-    expect((res as any).statusCode).toBe(400);
+    expect(res.statusCode).toBe(400);
   });
 
   it('returns the auth error when requireRole rejects (student role)', async () => {
-    (requireRole as any).mockReturnValue(
+    vi.mocked(requireRole).mockReturnValue(
       createResponse(HTTP_STATUS.FORBIDDEN, { error: "Role 'student' not authorized" })
     );
-    const res = await handler(makeEvent(), {} as any, () => {});
-    expect((res as any).statusCode).toBe(403);
+    const res = await runHandler(makeEvent());
+    expect(res.statusCode).toBe(403);
   });
 
   it('returns 405 for non-POST methods', async () => {
-    const res = await handler(makeEvent({ httpMethod: 'GET' }), {} as any, () => {});
-    expect((res as any).statusCode).toBe(405);
+    const res = await runHandler(makeEvent({ httpMethod: 'GET' }));
+    expect(res.statusCode).toBe(405);
   });
 
   it('returns 200 + OPTIONS for CORS preflight', async () => {
-    const res = await handler(makeEvent({ httpMethod: 'OPTIONS' }), {} as any, () => {});
-    expect([200, 204]).toContain((res as any).statusCode);
+    const res = await runHandler(makeEvent({ httpMethod: 'OPTIONS' }));
+    expect([200, 204]).toContain(res.statusCode);
   });
 
   it('returns 200 with uploadUrl, publicUrl, key, expiresIn=300', async () => {
-    const res = (await handler(makeEvent(), {} as any, () => {})) as any;
+    const res = await runHandler(makeEvent());
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.uploadUrl).toBe('https://signed.example/upload?sig=x');
@@ -114,13 +118,11 @@ describe('module-asset-function handler', () => {
   });
 
   it('uses correct extension for jpeg', async () => {
-    const res = (await handler(
+    const res = await runHandler(
       makeEvent({
         body: JSON.stringify({ contentType: 'image/jpeg', sizeBytes: 2048 }),
-      }),
-      {} as any,
-      () => {}
-    )) as any;
+      })
+    );
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).key).toMatch(/\.jpg$/);
   });

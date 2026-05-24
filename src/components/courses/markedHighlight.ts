@@ -1,10 +1,10 @@
-import type { MarkedExtension, TokenizerAndRendererExtension } from 'marked';
+import type { MarkedExtension, Token, TokenizerAndRendererExtension, Tokens } from 'marked';
 
 interface HighlightToken {
   type: 'highlight';
   raw: string;
   text: string;
-  tokens: any[];
+  tokens: Token[];
 }
 
 const highlight: TokenizerAndRendererExtension = {
@@ -28,7 +28,7 @@ const highlight: TokenizerAndRendererExtension = {
     this.lexer.inline(text, token.tokens);
     return token;
   },
-  renderer(token: any) {
+  renderer(token: Tokens.Generic) {
     // @ts-expect-error — `this.parser` is the runtime parser marked supplies
     return `<mark>${this.parser.parseInline(token.tokens)}</mark>`;
   },

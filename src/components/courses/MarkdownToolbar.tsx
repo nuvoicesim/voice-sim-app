@@ -113,7 +113,6 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
       onChange(value.slice(0, start) + insertion + value.slice(end));
     } catch (err) {
       // Hook already surfaces error state; toolbar stays silent here.
-      // eslint-disable-next-line no-console
       console.error("image upload failed", err);
     }
   };

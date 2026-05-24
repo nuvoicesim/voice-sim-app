@@ -43,13 +43,13 @@ describe('useMarkdownImageUpload', () => {
   });
 
   it('happy path: presign then PUT then return publicUrl + alt', async () => {
-    (moduleAssetApi.requestUploadUrl as any).mockResolvedValue({
+    vi.mocked(moduleAssetApi.requestUploadUrl).mockResolvedValue({
       uploadUrl: 'https://put.example/x',
       publicUrl: 'https://cdn.example/abc.png',
       key: 'module-assets/sub/202605/abc.png',
       expiresIn: 300,
     });
-    (fetch as any).mockResolvedValue({ ok: true, status: 200 });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200 } as Response);
 
     const { result } = renderHook(() => useMarkdownImageUpload());
     const file = makeFile('myPhoto.png', 'image/png', 2048);
@@ -73,13 +73,13 @@ describe('useMarkdownImageUpload', () => {
   });
 
   it('throws when PUT fails', async () => {
-    (moduleAssetApi.requestUploadUrl as any).mockResolvedValue({
+    vi.mocked(moduleAssetApi.requestUploadUrl).mockResolvedValue({
       uploadUrl: 'https://put.example/x',
       publicUrl: 'https://cdn.example/abc.png',
       key: 'k',
       expiresIn: 300,
     });
-    (fetch as any).mockResolvedValue({ ok: false, status: 500 });
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500 } as Response);
 
     const { result } = renderHook(() => useMarkdownImageUpload());
     const file = makeFile('a.png', 'image/png', 2048);

@@ -40,8 +40,8 @@ export function useMarkdownImageUpload() {
         publicUrl: presign.publicUrl,
         alt: file.name.replace(/\.[^.]+$/, ""),
       };
-    } catch (e: any) {
-      const msg = e?.message || "Upload failed";
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);
       throw new Error(msg);
     } finally {
