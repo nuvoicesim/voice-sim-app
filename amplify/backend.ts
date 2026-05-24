@@ -542,7 +542,8 @@ backend.unityBuildFunction.addEnvironment(
 );
 unityStorageBucket.grantReadWrite(backend.unityBuildFunction.resources.lambda);
 
-// module-asset-function — scoped to module-assets/* only (NOT bucket-wide)
+// module-asset-function — scoped to module-assets/* (faculty rich-text uploads)
+// and module-submissions/* (student external-link screenshots) only (NOT bucket-wide)
 backend.moduleAssetFunction.addEnvironment("S3_BUCKET_NAME", s3BucketName);
 backend.moduleAssetFunction.addEnvironment(
   "UNITY_BUILD_PUBLIC_BASE_URL",
@@ -551,7 +552,10 @@ backend.moduleAssetFunction.addEnvironment(
 backend.moduleAssetFunction.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions: ["s3:PutObject", "s3:AbortMultipartUpload"],
-    resources: [`${unityStorageBucket.bucketArn}/module-assets/*`],
+    resources: [
+      `${unityStorageBucket.bucketArn}/module-assets/*`,
+      `${unityStorageBucket.bucketArn}/module-submissions/*`,
+    ],
   })
 );
 
@@ -922,6 +926,8 @@ const courseInstructorRolePath = courseInstructorItemPath.addResource("role");
 courseInstructorRolePath.addMethod("PUT", courseLambdaIntegration, cognitoMethodOptions);
 const courseMyGroupsPath = courseItemPath.addResource("my-groups");
 courseMyGroupsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
+const courseGroupAssignmentsPath = courseItemPath.addResource("group-assignments");
+courseGroupAssignmentsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
 const courseEnrollmentsPath = courseItemPath.addResource("enrollments");
 courseEnrollmentsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
 courseEnrollmentsPath.addMethod("POST", courseLambdaIntegration, cognitoMethodOptions);

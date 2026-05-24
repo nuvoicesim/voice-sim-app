@@ -84,6 +84,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       return await handleListMyGroups(caller!, pathParams.courseId);
     }
 
+    // ── Faculty view: all group assignments for the course ──
+    if (
+      method === "GET" &&
+      pathParams.courseId &&
+      resource.endsWith("/courses/{courseId}/group-assignments")
+    ) {
+      return await handleListGroupAssignments(caller!, pathParams.courseId);
+    }
+
     // ── Enrollments ──
     if (pathParams.courseId && resource.includes("/enrollments")) {
       if (method === "GET") {
@@ -525,6 +534,31 @@ async function handleListMyGroups(caller: any, courseId: string) {
     assignedAt: row.assignedAt,
   }));
   return createResponse(HTTP_STATUS.OK, { groups });
+}
+
+async function handleListGroupAssignments(caller: any, courseId: string) {
+  if (!STUDENT_GROUP_ASSIGNMENT_TABLE) {
+    return createResponse(HTTP_STATUS.OK, { assignments: [] });
+  }
+  const authError = await requireCourseInstructor(caller, courseId, dynamo);
+  if (authError) return authError;
+
+  const result = await dynamo.send(
+    new ScanCommand({
+      TableName: STUDENT_GROUP_ASSIGNMENT_TABLE,
+      FilterExpression: "courseId = :c",
+      ExpressionAttributeValues: { ":c": courseId },
+    })
+  );
+  const assignments = (result.Items || []).map((row) => ({
+    courseId: row.courseId,
+    studentUserId: row.studentUserId,
+    scopeKey: row.scopeKey,
+    groupKey: row.groupKey,
+    assignedByItemId: row.assignedByItemId,
+    assignedAt: row.assignedAt,
+  }));
+  return createResponse(HTTP_STATUS.OK, { assignments });
 }
 
 // ───────────── Enrollments ─────────────
