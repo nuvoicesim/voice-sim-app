@@ -1042,15 +1042,9 @@ const moduleAssetLambdaIntegration = new LambdaIntegration(
 );
 const moduleAssetsPath = myRestApi.root.addResource("module-assets");
 const moduleAssetsUploadUrlPath = moduleAssetsPath.addResource("upload-url");
-// Explicit OPTIONS preflight. The RestApi has defaultCorsPreflightOptions,
-// but inheritance to nested resources added late can be flaky depending on
-// CDK version — wire it directly so the route is guaranteed to respond to
-// preflight without invoking the Lambda.
-moduleAssetsUploadUrlPath.addCorsPreflight({
-  allowOrigins: Cors.ALL_ORIGINS,
-  allowMethods: ["POST", "OPTIONS"],
-  allowHeaders: [...Cors.DEFAULT_HEADERS, "X-Request-ID"],
-});
+// OPTIONS preflight is auto-added by the RestApi's defaultCorsPreflightOptions
+// (see RestApi construction above); calling addCorsPreflight here would
+// conflict with that and fail CDK synth.
 moduleAssetsUploadUrlPath.addMethod(
   "POST",
   moduleAssetLambdaIntegration,
