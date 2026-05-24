@@ -1,27 +1,9 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef } from 'react';
-import { MantineProvider } from '@mantine/core';
 import { MarkdownToolbar } from './MarkdownToolbar';
-
-beforeAll(() => {
-  if (typeof window !== 'undefined' && !window.matchMedia) {
-    Object.defineProperty(window, 'matchMedia', {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }),
-    });
-  }
-});
+import { MantineTestWrapper } from '../../test-utils/renderWithMantine';
 
 function Harness({
   initial,
@@ -32,12 +14,12 @@ function Harness({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   return (
-    <MantineProvider>
+    <MantineTestWrapper>
       <div>
         <MarkdownToolbar textareaRef={ref} value={initial} onChange={onChange} />
         <textarea ref={ref} defaultValue={initial} data-testid="ta" />
       </div>
-    </MantineProvider>
+    </MantineTestWrapper>
   );
 }
 
@@ -52,10 +34,8 @@ describe('MarkdownToolbar — Bold', () => {
     const onChange = vi.fn();
     render(<Harness initial="hello world" onChange={onChange} />);
     const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
-    setSelection(ta, 0, 5); // "hello"
-
+    setSelection(ta, 0, 5);
     await user.click(screen.getByRole('button', { name: /bold/i }));
-
     expect(onChange).toHaveBeenCalledWith('**hello** world');
   });
 
@@ -65,9 +45,7 @@ describe('MarkdownToolbar — Bold', () => {
     render(<Harness initial="" onChange={onChange} />);
     const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
     setSelection(ta, 0, 0);
-
     await user.click(screen.getByRole('button', { name: /bold/i }));
-
     expect(onChange).toHaveBeenCalledWith('**bold**');
   });
 });
