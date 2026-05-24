@@ -39,6 +39,7 @@ import CourseEditorPage from './portals/faculty/courses/CourseEditorPage';
 import ModuleEditorPage from './portals/faculty/courses/ModuleEditorPage';
 import ModuleItemEditorPage from './portals/faculty/courses/ModuleItemEditorPage';
 import CourseReviewBoardPage from './portals/faculty/courses/CourseReviewBoardPage';
+import StudentCourseDetailPage from './portals/faculty/courses/StudentCourseDetailPage';
 import SurveyTemplateListPage from './portals/faculty/surveys/SurveyTemplateListPage';
 import SurveyTemplateEditorPage from './portals/faculty/surveys/SurveyTemplateEditorPage';
 
@@ -128,6 +129,7 @@ function App() {
                   <Route path="courses/new" element={<CreateCoursePage />} />
                   <Route path="courses/:courseId" element={<CourseEditorPage />} />
                   <Route path="courses/:courseId/reviews" element={<CourseReviewBoardPage />} />
+                  <Route path="courses/:courseId/students/:studentUserId" element={<StudentCourseDetailPage />} />
                   <Route path="courses/:courseId/modules/:moduleId" element={<ModuleEditorPage />} />
                   <Route path="courses/:courseId/modules/:moduleId/items/:itemId" element={<ModuleItemEditorPage />} />
                   <Route path="surveys" element={<SurveyTemplateListPage />} />
