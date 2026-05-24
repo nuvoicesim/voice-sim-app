@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import {
   Anchor,
@@ -83,7 +83,8 @@ export default function CourseEditorPage() {
   const modules = useSelector(selectModulesByCourse(courseId || ""));
   const myUserId = useSelector(selectUserId);
   const authRole = useSelector(selectRole);
-  const [tab, setTab] = useState<string>("overview");
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<string>(searchParams.get("tab") || "overview");
 
   useEffect(() => {
     if (courseId) {
