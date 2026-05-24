@@ -579,6 +579,10 @@ async function handleListEnrollments(caller: any, courseId: string) {
   // Default courses bypass CourseEnrollment — any student who has engaged
   // with content (StudentItemProgress row exists) is implicitly a student
   // of the course. Surface them so faculty can see their progress.
+  //
+  // Note: an instruction item written via the `completed` path never sets
+  // startedAt/unlockedAt — only completedAt. So we accept any row and use
+  // whichever timestamp is available.
   if (course.isDefault === true && STUDENT_ITEM_PROGRESS_TABLE) {
     const knownIds = new Set(enrollments.map((e) => e.studentUserId));
     const progressRes = await dynamo.send(
@@ -586,16 +590,20 @@ async function handleListEnrollments(caller: any, courseId: string) {
         TableName: STUDENT_ITEM_PROGRESS_TABLE,
         FilterExpression: "courseId = :c",
         ExpressionAttributeValues: { ":c": courseId },
-        ProjectionExpression: "studentUserId, unlockedAt, startedAt",
       })
     );
     const earliestByStudent: Record<string, string> = {};
     for (const row of progressRes.Items || []) {
       const sid = row.studentUserId;
       if (!sid || knownIds.has(sid)) continue;
-      const ts = row.startedAt || row.unlockedAt;
-      if (!ts) continue;
-      if (!earliestByStudent[sid] || ts < earliestByStudent[sid]) {
+      const ts =
+        row.unlockedAt ||
+        row.startedAt ||
+        row.completedAt ||
+        row.updatedAt ||
+        row.createdAt ||
+        "";
+      if (!earliestByStudent[sid] || (ts && ts < earliestByStudent[sid])) {
         earliestByStudent[sid] = ts;
       }
     }
