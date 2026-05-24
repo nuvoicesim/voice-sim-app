@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { Textarea, Tabs, Box, Text } from "@mantine/core";
 import { marked } from "marked";
+import { highlightExtension } from "./markedHighlight";
+
+marked.use(highlightExtension);
 
 interface Props {
   value: string;
@@ -14,7 +17,7 @@ export function MarkdownTextarea({ value, onChange, label, minRows = 6, placehol
   const [tab, setTab] = useState<string>("write");
   const html = (() => {
     try {
-      return marked.parse(value || "", { async: false }) as string;
+      return marked.parse(value || "", { async: false, breaks: true, gfm: true }) as string;
     } catch {
       return value || "";
     }
