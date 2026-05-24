@@ -17,6 +17,13 @@ export type AtomicCounterIncrement = (input: {
 export interface ChooseGroupBalancedArgs {
   groups: BalancedGroup[];
   consentItemId?: string;
+  /**
+   * Group key that non-consented (declined or undecided) students are
+   * assigned to without participating in the round-robin counter. When
+   * omitted, non-consented students fall into the legacy nonConsented
+   * counter bucket.
+   */
+  defaultGroupKey?: string;
   callerUserId: string;
   itemId: string;
   resolveBucket: BucketResolver;
@@ -26,7 +33,11 @@ export interface ChooseGroupBalancedArgs {
 export interface ChooseGroupBalancedResult {
   groupKey: string;
   bucket: BalancedBucket;
-  count: number;
+  /**
+   * The post-increment counter value, or null when the student was routed
+   * to defaultGroupKey and the counter was intentionally not advanced.
+   */
+  count: number | null;
 }
 
 export async function chooseGroupBalanced(
@@ -39,6 +50,13 @@ export async function chooseGroupBalanced(
     consentItemId: args.consentItemId,
     callerUserId: args.callerUserId,
   });
+  if (bucket === "nonConsented" && args.defaultGroupKey) {
+    return {
+      groupKey: args.defaultGroupKey,
+      bucket,
+      count: null,
+    };
+  }
   const count = await args.incrementCounter({
     itemId: args.itemId,
     bucket,
@@ -64,6 +82,14 @@ export function validateRandomizerPayload(payload: any): string | null {
   if (payload.consentItemId !== undefined) {
     if (typeof payload.consentItemId !== "string" || payload.consentItemId.length === 0) {
       return "randomizer.payload.consentItemId must be a non-empty string";
+    }
+  }
+  if (payload.defaultGroupKey !== undefined) {
+    if (
+      typeof payload.defaultGroupKey !== "string" ||
+      payload.defaultGroupKey.length === 0
+    ) {
+      return "randomizer.payload.defaultGroupKey must be a non-empty string";
     }
   }
   return null;
