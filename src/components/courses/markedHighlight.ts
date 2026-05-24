@@ -24,7 +24,6 @@ const highlight: TokenizerAndRendererExtension = {
       text,
       tokens: [],
     };
-    // @ts-expect-error — `this.lexer` is the runtime lexer marked supplies
     this.lexer.inline(text, token.tokens);
     return token;
   },
