@@ -1,5 +1,5 @@
 import { Group, ActionIcon, Tooltip } from "@mantine/core";
-import { IconBold } from "@tabler/icons-react";
+import { IconBold, IconItalic, IconHighlight } from "@tabler/icons-react";
 import { useCallback } from "react";
 
 interface Props {
@@ -32,11 +32,29 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
     onChange(wrapSelection(value, textareaRef.current, "**", "**", "bold"));
   }, [value, onChange, textareaRef]);
 
+  const handleItalic = useCallback(() => {
+    onChange(wrapSelection(value, textareaRef.current, "*", "*", "italic"));
+  }, [value, onChange, textareaRef]);
+
+  const handleHighlight = useCallback(() => {
+    onChange(wrapSelection(value, textareaRef.current, "==", "==", "highlight"));
+  }, [value, onChange, textareaRef]);
+
   return (
     <Group gap={4} mb={4}>
       <Tooltip label="Bold (Ctrl+B)">
         <ActionIcon variant="subtle" onClick={handleBold} aria-label="Bold">
           <IconBold size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Italic">
+        <ActionIcon variant="subtle" onClick={handleItalic} aria-label="Italic">
+          <IconItalic size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Highlight">
+        <ActionIcon variant="subtle" onClick={handleHighlight} aria-label="Highlight">
+          <IconHighlight size={14} />
         </ActionIcon>
       </Tooltip>
     </Group>

@@ -49,3 +49,31 @@ describe('MarkdownToolbar — Bold', () => {
     expect(onChange).toHaveBeenCalledWith('**bold**');
   });
 });
+
+describe('MarkdownToolbar — Italic', () => {
+  it('wraps selected text with *...*', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial="hello world" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 6, 11); // "world"
+
+    await user.click(screen.getByRole('button', { name: /italic/i }));
+
+    expect(onChange).toHaveBeenCalledWith('hello *world*');
+  });
+});
+
+describe('MarkdownToolbar — Highlight', () => {
+  it('wraps selected text with ==...==', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial="hello world" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 5); // "hello"
+
+    await user.click(screen.getByRole('button', { name: /highlight/i }));
+
+    expect(onChange).toHaveBeenCalledWith('==hello== world');
+  });
+});
