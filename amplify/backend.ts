@@ -926,8 +926,6 @@ const courseInstructorRolePath = courseInstructorItemPath.addResource("role");
 courseInstructorRolePath.addMethod("PUT", courseLambdaIntegration, cognitoMethodOptions);
 const courseMyGroupsPath = courseItemPath.addResource("my-groups");
 courseMyGroupsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
-const courseGroupAssignmentsPath = courseItemPath.addResource("group-assignments");
-courseGroupAssignmentsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
 const courseEnrollmentsPath = courseItemPath.addResource("enrollments");
 courseEnrollmentsPath.addMethod("GET", courseLambdaIntegration, cognitoMethodOptions);
 courseEnrollmentsPath.addMethod("POST", courseLambdaIntegration, cognitoMethodOptions);

@@ -17,6 +17,7 @@ export const groupAssignmentApi = {
     apiGet<{ groups: GroupAssignmentRow[] }>(`/courses/${courseId}/my-groups`),
   listForCourse: (courseId: string) =>
     apiGet<{ assignments: CourseGroupAssignmentRow[] }>(
-      `/courses/${courseId}/group-assignments`
+      `/courses/${courseId}/my-groups`,
+      { all: "true" }
     ),
 };

@@ -75,22 +75,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       }
     }
 
-    // ── Student's own group assignments for this course ──
+    // ── Group assignments for this course ──
+    //   ?all=true  → faculty view, all students (instructor-only)
+    //   default    → caller's own assignments (student or instructor; debug use)
     if (
       method === "GET" &&
       pathParams.courseId &&
       resource.endsWith("/courses/{courseId}/my-groups")
     ) {
+      const qs = event.queryStringParameters || {};
+      if (qs.all === "true") {
+        return await handleListGroupAssignments(caller!, pathParams.courseId);
+      }
       return await handleListMyGroups(caller!, pathParams.courseId);
-    }
-
-    // ── Faculty view: all group assignments for the course ──
-    if (
-      method === "GET" &&
-      pathParams.courseId &&
-      resource.endsWith("/courses/{courseId}/group-assignments")
-    ) {
-      return await handleListGroupAssignments(caller!, pathParams.courseId);
     }
 
     // ── Enrollments ──
