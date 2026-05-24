@@ -508,7 +508,13 @@ function RandomizerPayloadEditor({
           { value: "balanced", label: "Balanced (1:1 for consented students)" },
         ]}
         value={strategy}
-        onChange={(v) => onChange({ strategy: v })}
+        onChange={(v) =>
+          onChange(
+            v === "balanced"
+              ? { strategy: v }
+              : { strategy: v, consentItemId: undefined }
+          )
+        }
       />
       {isBalanced && (
         <Select

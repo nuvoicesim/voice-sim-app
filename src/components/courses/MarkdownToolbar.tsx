@@ -1,5 +1,5 @@
 import { Group, ActionIcon, Tooltip } from "@mantine/core";
-import { IconBold, IconItalic, IconHighlight } from "@tabler/icons-react";
+import { IconBold, IconItalic, IconHighlight, IconLink } from "@tabler/icons-react";
 import { useCallback } from "react";
 
 interface Props {
@@ -40,6 +40,22 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
     onChange(wrapSelection(value, textareaRef.current, "==", "==", "highlight"));
   }, [value, onChange, textareaRef]);
 
+  const handleLink = useCallback(() => {
+    const url = window.prompt("URL");
+    if (!url) return;
+    const ta = textareaRef.current;
+    if (!ta) {
+      onChange(value + `[link](${url})`);
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const label = start === end ? "link" : value.slice(start, end);
+    onChange(
+      value.slice(0, start) + `[${label}](${url})` + value.slice(end)
+    );
+  }, [value, onChange, textareaRef]);
+
   return (
     <Group gap={4} mb={4}>
       <Tooltip label="Bold (Ctrl+B)">
@@ -55,6 +71,11 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
       <Tooltip label="Highlight">
         <ActionIcon variant="subtle" onClick={handleHighlight} aria-label="Highlight">
           <IconHighlight size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Insert link">
+        <ActionIcon variant="subtle" onClick={handleLink} aria-label="Link">
+          <IconLink size={14} />
         </ActionIcon>
       </Tooltip>
     </Group>

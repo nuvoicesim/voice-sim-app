@@ -77,3 +77,44 @@ describe('MarkdownToolbar — Highlight', () => {
     expect(onChange).toHaveBeenCalledWith('==hello== world');
   });
 });
+
+describe('MarkdownToolbar — Link', () => {
+  it('wraps selection as [sel](url) when user enters a URL', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(window, 'prompt').mockReturnValue('https://x.test');
+    render(<Harness initial="click here" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 5); // "click"
+
+    await user.click(screen.getByRole('button', { name: /link/i }));
+
+    expect(onChange).toHaveBeenCalledWith('[click](https://x.test) here');
+  });
+
+  it('inserts [link](url) when nothing is selected', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(window, 'prompt').mockReturnValue('https://y.test');
+    render(<Harness initial="" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 0);
+
+    await user.click(screen.getByRole('button', { name: /link/i }));
+
+    expect(onChange).toHaveBeenCalledWith('[link](https://y.test)');
+  });
+
+  it('does nothing when prompt is cancelled', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.spyOn(window, 'prompt').mockReturnValue(null);
+    render(<Harness initial="x" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 1);
+
+    await user.click(screen.getByRole('button', { name: /link/i }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

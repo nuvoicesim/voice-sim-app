@@ -1,5 +1,5 @@
 import type { APIGatewayProxyHandler } from "aws-lambda";
-import { ScanCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, GetCommand, UpdateCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { createHash } from "crypto";
 import {
   createResponse,
@@ -43,6 +43,11 @@ const ASSIGNMENT_TABLE = process.env.ASSIGNMENT_TABLE_NAME!;
 const EVENT_LOG_TABLE = process.env.EVENT_LOG_TABLE_NAME!;
 const ENROLLMENT_TABLE = process.env.COURSE_ENROLLMENT_TABLE_NAME!;
 const CONSENT_DECISION_TABLE = process.env.CONSENT_DECISION_TABLE_NAME!;
+
+// Internal counters maintained by the balanced randomizer strategy on the
+// ModuleItem row itself. Underscore prefix marks them as not API-visible.
+const BALANCED_CONSENTED_COUNT_ATTR = "_balancedConsentedCount";
+const BALANCED_NONCONSENTED_COUNT_ATTR = "_balancedNonConsentedCount";
 
 const dynamo = createDynamoDbClient();
 
@@ -526,13 +531,17 @@ async function handleRandomize(caller: any, itemId: string) {
   const existing = await getItem(
     GROUP_TABLE,
     { courseId: item.courseId, "studentUserId#scopeKey": groupSortKey },
-    dynamo
+    dynamo,
+    { consistentRead: true }
   );
   if (existing) {
     return createResponse(HTTP_STATUS.OK, { assignment: existing, alreadyAssigned: true });
   }
 
   let groupKey: string;
+  // Set only when the balanced strategy actually incremented a counter, so
+  // that on a putItem failure below we know which counter to compensate.
+  let balancedCounterAttr: string | null = null;
   if (item.payload?.strategy === "balanced") {
     const consentItemId: string | undefined = item.payload?.consentItemId;
     const balancedResult = await chooseGroupBalanced({
@@ -552,8 +561,8 @@ async function handleRandomize(caller: any, itemId: string) {
       incrementCounter: async ({ itemId: id, bucket }) => {
         const attr =
           bucket === "consented"
-            ? "_balancedConsentedCount"
-            : "_balancedNonConsentedCount";
+            ? BALANCED_CONSENTED_COUNT_ATTR
+            : BALANCED_NONCONSENTED_COUNT_ATTR;
         const result = await dynamo.send(
           new UpdateCommand({
             TableName: MODULE_ITEM_TABLE,
@@ -568,6 +577,7 @@ async function handleRandomize(caller: any, itemId: string) {
         if (typeof newValue !== "number") {
           throw new Error("balanced counter increment returned non-numeric value");
         }
+        balancedCounterAttr = attr;
         return newValue;
       },
     });
@@ -600,7 +610,57 @@ async function handleRandomize(caller: any, itemId: string) {
     createdAt: now,
     updatedAt: now,
   };
-  await putItem(GROUP_TABLE, row, dynamo);
+  // Conditional put: a parallel request from the same student (double-tap,
+  // retry storm) may have inserted the assignment between our existing-row
+  // check and this write. If the put fails for any reason and we had
+  // incremented the balanced counter, compensate it so the strict 1:1
+  // property is preserved for the next arrivals. On a confirmed collision,
+  // return the winning row instead of an error.
+  try {
+    await dynamo.send(
+      new PutCommand({
+        TableName: GROUP_TABLE,
+        Item: row,
+        ConditionExpression:
+          "attribute_not_exists(courseId) AND attribute_not_exists(#sk)",
+        ExpressionAttributeNames: { "#sk": "studentUserId#scopeKey" },
+      })
+    );
+  } catch (putErr: any) {
+    if (balancedCounterAttr) {
+      try {
+        await dynamo.send(
+          new UpdateCommand({
+            TableName: MODULE_ITEM_TABLE,
+            Key: { moduleItemId: itemId },
+            UpdateExpression: "ADD #c :neg",
+            ExpressionAttributeNames: { "#c": balancedCounterAttr },
+            ExpressionAttributeValues: { ":neg": -1 },
+          })
+        );
+      } catch (compErr) {
+        console.error(
+          "compensating decrement of balanced counter failed",
+          compErr
+        );
+      }
+    }
+    if (putErr?.name === "ConditionalCheckFailedException") {
+      const winner = await getItem(
+        GROUP_TABLE,
+        { courseId: item.courseId, "studentUserId#scopeKey": groupSortKey },
+        dynamo,
+        { consistentRead: true }
+      );
+      if (winner) {
+        return createResponse(HTTP_STATUS.OK, {
+          assignment: winner,
+          alreadyAssigned: true,
+        });
+      }
+    }
+    throw putErr;
+  }
 
   // Mark progress completed for the randomizer item.
   const progressNow = {
