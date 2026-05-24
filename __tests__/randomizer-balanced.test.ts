@@ -140,6 +140,93 @@ describe("chooseGroupBalanced", () => {
     expect(r.count).toBe(7);
   });
 
+  it("routes non-consented to defaultGroupKey without incrementing counter", async () => {
+    const increment = vi.fn();
+    const resolveBucket = vi.fn(async () => "nonConsented" as const);
+
+    const r = await chooseGroupBalanced({
+      groups: TWO_GROUPS,
+      consentItemId: "consent-1",
+      defaultGroupKey: "GROUP_B",
+      callerUserId: "u1",
+      itemId: "item-1",
+      resolveBucket,
+      incrementCounter: increment,
+    });
+
+    expect(r.bucket).toBe("nonConsented");
+    expect(r.groupKey).toBe("GROUP_B");
+    expect(r.count).toBeNull();
+    expect(increment).not.toHaveBeenCalled();
+  });
+
+  it("still increments the counter for consented students when defaultGroupKey is set", async () => {
+    const increment = makeIncrementer();
+    const resolveBucket = vi.fn(async () => "consented" as const);
+
+    const r = await chooseGroupBalanced({
+      groups: TWO_GROUPS,
+      consentItemId: "consent-1",
+      defaultGroupKey: "GROUP_B",
+      callerUserId: "u1",
+      itemId: "item-1",
+      resolveBucket,
+      incrementCounter: increment,
+    });
+
+    expect(r.bucket).toBe("consented");
+    expect(r.groupKey).toBe("GROUP_A");
+    expect(r.count).toBe(1);
+    expect(increment).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to non-consented bucket round-robin when defaultGroupKey is omitted", async () => {
+    const increment = makeIncrementer();
+    const resolveBucket = vi.fn(async () => "nonConsented" as const);
+
+    const first = await chooseGroupBalanced({
+      groups: TWO_GROUPS,
+      consentItemId: "consent-1",
+      callerUserId: "u1",
+      itemId: "item-1",
+      resolveBucket,
+      incrementCounter: increment,
+    });
+    const second = await chooseGroupBalanced({
+      groups: TWO_GROUPS,
+      consentItemId: "consent-1",
+      callerUserId: "u2",
+      itemId: "item-1",
+      resolveBucket,
+      incrementCounter: increment,
+    });
+
+    expect(first.groupKey).toBe("GROUP_A");
+    expect(second.groupKey).toBe("GROUP_B");
+    expect(increment).toHaveBeenCalledTimes(2);
+  });
+
+  it("six declined students all land in defaultGroupKey and counter never moves", async () => {
+    const increment = vi.fn();
+    const resolveBucket = vi.fn(async () => "nonConsented" as const);
+
+    for (let i = 0; i < 6; i++) {
+      const r = await chooseGroupBalanced({
+        groups: TWO_GROUPS,
+        consentItemId: "consent-1",
+        defaultGroupKey: "GROUP_A",
+        callerUserId: `u${i}`,
+        itemId: "item-1",
+        resolveBucket,
+        incrementCounter: increment,
+      });
+      expect(r.groupKey).toBe("GROUP_A");
+      expect(r.count).toBeNull();
+    }
+
+    expect(increment).not.toHaveBeenCalled();
+  });
+
   it("throws when groups array is empty", async () => {
     const increment = vi.fn();
     const resolveBucket = vi.fn(async () => "consented" as const);

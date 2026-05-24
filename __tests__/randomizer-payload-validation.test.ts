@@ -37,4 +37,22 @@ describe("validateRandomizerPayload", () => {
   it("rejects empty-string consentItemId", () => {
     expect(validateRandomizerPayload({ consentItemId: "" })).toMatch(/consentItemId/);
   });
+
+  it("accepts a defaultGroupKey string", () => {
+    expect(
+      validateRandomizerPayload({ defaultGroupKey: "GROUP_A" })
+    ).toBeNull();
+  });
+
+  it("rejects non-string defaultGroupKey", () => {
+    expect(validateRandomizerPayload({ defaultGroupKey: 5 })).toMatch(
+      /defaultGroupKey/
+    );
+  });
+
+  it("rejects empty-string defaultGroupKey", () => {
+    expect(validateRandomizerPayload({ defaultGroupKey: "" })).toMatch(
+      /defaultGroupKey/
+    );
+  });
 });
