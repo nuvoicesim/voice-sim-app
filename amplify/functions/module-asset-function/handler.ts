@@ -31,12 +31,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   try {
     const caller = await extractCallerIdentity(event);
-    const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
+    const authError = requireRole(caller, [
+      "student",
+      "faculty",
+      "simulation_designer",
+      "admin",
+    ]);
     if (authError) return authError;
 
     const body = parseJsonBody(event.body);
     const contentType = typeof body?.contentType === "string" ? body.contentType.trim() : "";
     const sizeBytes = typeof body?.sizeBytes === "number" ? body.sizeBytes : NaN;
+    const purpose =
+      typeof body?.purpose === "string" ? body.purpose.trim() : "module-asset";
 
     if (!contentType || !(contentType in ALLOWED_CONTENT_TYPES)) {
       return badRequestResponse(
@@ -63,7 +70,18 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const ext = ALLOWED_CONTENT_TYPES[contentType];
     const now = new Date();
     const yyyymm = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-    const key = `module-assets/${caller!.userId}/${yyyymm}/${randomUUID()}.${ext}`;
+    const isStudentSubmission =
+      caller!.role === "student" || purpose === "submission";
+    if (purpose === "submission" && caller!.role !== "student") {
+      return badRequestResponse("purpose 'submission' is only valid for students");
+    }
+    if (caller!.role === "student" && purpose !== "submission") {
+      return badRequestResponse(
+        "students must request uploads with purpose 'submission'"
+      );
+    }
+    const prefix = isStudentSubmission ? "module-submissions" : "module-assets";
+    const key = `${prefix}/${caller!.userId}/${yyyymm}/${randomUUID()}.${ext}`;
 
     const command = new PutObjectCommand({
       Bucket: bucketName,

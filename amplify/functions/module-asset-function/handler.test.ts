@@ -31,7 +31,7 @@ function makeEvent(overrides: Partial<APIGatewayProxyEvent> = {}): APIGatewayPro
     queryStringParameters: null,
     multiValueQueryStringParameters: null,
     stageVariables: null,
-    requestContext: { authorizer: { claims: {} } } as APIGatewayProxyEvent['requestContext'],
+    requestContext: { authorizer: { claims: {} } } as unknown as APIGatewayProxyEvent['requestContext'],
     ...overrides,
   } as APIGatewayProxyEvent;
 }
@@ -125,5 +125,49 @@ describe('module-asset-function handler', () => {
     );
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).key).toMatch(/\.jpg$/);
+  });
+
+  it("returns 400 for student without purpose='submission'", async () => {
+    vi.mocked(extractCallerIdentity).mockResolvedValue({ userId: 'stu-1', role: 'student' });
+    const res = await runHandler(
+      makeEvent({
+        body: JSON.stringify({ contentType: 'image/png', sizeBytes: 1024 }),
+      })
+    );
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 for non-student requesting purpose='submission'", async () => {
+    const res = await runHandler(
+      makeEvent({
+        body: JSON.stringify({
+          contentType: 'image/png',
+          sizeBytes: 1024,
+          purpose: 'submission',
+        }),
+      })
+    );
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("uses module-submissions prefix for student submission uploads", async () => {
+    vi.mocked(extractCallerIdentity).mockResolvedValue({ userId: 'stu-1', role: 'student' });
+    const res = await runHandler(
+      makeEvent({
+        body: JSON.stringify({
+          contentType: 'image/png',
+          sizeBytes: 1024,
+          purpose: 'submission',
+        }),
+      })
+    );
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.key).toMatch(
+      /^module-submissions\/stu-1\/\d{6}\/[0-9a-f-]{36}\.png$/
+    );
+    expect(body.publicUrl).toMatch(
+      /^https:\/\/cdn\.example\.test\/module-submissions\/stu-1\/\d{6}\/[0-9a-f-]{36}\.png$/
+    );
   });
 });

@@ -14,6 +14,7 @@ export interface StudentItemProgress {
   bestSessionId?: string;
   bestSessionScore?: number;
   unlockedSubKeys?: string[];
+  submissionImageUrls?: string[];
 }
 
 interface ProgressState {
@@ -33,8 +34,19 @@ export const fetchMyProgress = createAsyncThunk(
 
 export const markComplete = createAsyncThunk(
   "progress/markComplete",
-  async (itemId: string) =>
-    ({ itemId, ...(await moduleItemApi.updateProgress(itemId, "completed")) })
+  async (
+    arg: string | { itemId: string; submissionImageUrls?: string[] }
+  ) => {
+    const itemId = typeof arg === "string" ? arg : arg.itemId;
+    const submissionImageUrls =
+      typeof arg === "string" ? undefined : arg.submissionImageUrls;
+    return {
+      itemId,
+      ...(await moduleItemApi.updateProgress(itemId, "completed", {
+        submissionImageUrls,
+      })),
+    };
+  }
 );
 
 export const markInProgress = createAsyncThunk(

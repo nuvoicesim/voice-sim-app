@@ -14,8 +14,17 @@ export const moduleItemApi = {
       `/module-items/${itemId}/progress`,
       studentUserId ? { studentUserId } : undefined
     ),
-  updateProgress: (itemId: string, state: string) =>
-    apiPost(`/module-items/${itemId}/progress`, { state }),
+  updateProgress: (
+    itemId: string,
+    state: string,
+    options?: { submissionImageUrls?: string[] }
+  ) =>
+    apiPost(`/module-items/${itemId}/progress`, {
+      state,
+      ...(options?.submissionImageUrls !== undefined
+        ? { submissionImageUrls: options.submissionImageUrls }
+        : {}),
+    }),
 
   // Randomizer
   randomize: (itemId: string) => apiPost(`/module-items/${itemId}/randomize`, {}),

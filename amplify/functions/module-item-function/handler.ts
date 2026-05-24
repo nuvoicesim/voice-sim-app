@@ -461,10 +461,28 @@ async function handleUpdateProgress(caller: any, itemId: string, body: string | 
   if (accessError) return accessError;
 
   const payload = parseJsonBody(body);
-  const { state } = payload;
+  const { state, submissionImageUrls } = payload;
   const allowedStates = ["unlocked", "in_progress", "completed"];
   if (!allowedStates.includes(state)) {
     return badRequestResponse(`state must be one of: ${allowedStates.join(", ")}`);
+  }
+
+  let cleanedSubmissionImageUrls: string[] | undefined;
+  if (submissionImageUrls !== undefined) {
+    if (!Array.isArray(submissionImageUrls)) {
+      return badRequestResponse("submissionImageUrls must be an array of strings");
+    }
+    if (submissionImageUrls.length > 2) {
+      return badRequestResponse("submissionImageUrls may contain at most 2 URLs");
+    }
+    for (const url of submissionImageUrls) {
+      if (typeof url !== "string" || !url.startsWith("https://")) {
+        return badRequestResponse(
+          "submissionImageUrls entries must be https URLs"
+        );
+      }
+    }
+    cleanedSubmissionImageUrls = submissionImageUrls as string[];
   }
 
   const now = generateTimestamp();
@@ -483,6 +501,9 @@ async function handleUpdateProgress(caller: any, itemId: string, body: string | 
     updatedAt: now,
     createdAt: existing?.createdAt || now,
   };
+  if (cleanedSubmissionImageUrls !== undefined) {
+    next.submissionImageUrls = cleanedSubmissionImageUrls;
+  }
   if (state === "in_progress" && !existing?.startedAt) next.startedAt = now;
   if (state === "completed") {
     next.completedAt = now;
