@@ -218,7 +218,7 @@ export function MarkdownToolbar({ textareaRef, value, onChange }: Props) {
           </Group>
           <NumberInput
             label="Custom width (px)"
-            placeholder="200-2000"
+            placeholder="50-2000"
             value={selectedSize ?? ""}
             onChange={(v) => setSelectedSize(typeof v === "number" ? v : null)}
             min={50}
