@@ -200,24 +200,76 @@ describe('MarkdownToolbar — Heading', () => {
 });
 
 describe('MarkdownToolbar — Image', () => {
-  it('inserts ![alt](url) at cursor after upload completes', async () => {
+  it('opens size picker after upload, inserts ![alt|400](url) with default Medium', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<Harness initial="before  after" onChange={onChange} />);
     const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
-    setSelection(ta, 7, 7); // cursor between two spaces
+    setSelection(ta, 7, 7);
 
     const file = new File(
       [new Blob([new ArrayBuffer(2048)], { type: 'image/png' })],
       'x.png',
       { type: 'image/png' }
     );
-
     const fileInput = screen.getByTestId('markdown-image-input') as HTMLInputElement;
     await user.upload(fileInput, file);
 
+    // Modal opens — wait for it
+    const insertBtn = await screen.findByRole('button', { name: /^Insert$/ });
+
+    // Default selection is Medium (400). Click Insert.
+    await user.click(insertBtn);
+
     await waitFor(() => {
-      expect(onChange).toHaveBeenCalledWith('before ![x](https://cdn.example/x.png) after');
+      expect(onChange).toHaveBeenCalledWith('before ![x|400](https://cdn.example/x.png) after');
     });
+  });
+
+  it('inserts without size suffix when Original is selected', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial="" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 0);
+
+    const file = new File(
+      [new Blob([new ArrayBuffer(2048)], { type: 'image/png' })],
+      'x.png',
+      { type: 'image/png' }
+    );
+    const fileInput = screen.getByTestId('markdown-image-input') as HTMLInputElement;
+    await user.upload(fileInput, file);
+
+    const originalBtn = await screen.findByRole('button', { name: /^Original$/ });
+    await user.click(originalBtn);
+    await user.click(screen.getByRole('button', { name: /^Insert$/ }));
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith('![x](https://cdn.example/x.png)');
+    });
+  });
+
+  it('does not insert when modal is cancelled', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness initial="x" onChange={onChange} />);
+    const ta = screen.getByTestId('ta') as HTMLTextAreaElement;
+    setSelection(ta, 0, 1);
+
+    const file = new File(
+      [new Blob([new ArrayBuffer(2048)], { type: 'image/png' })],
+      'x.png',
+      { type: 'image/png' }
+    );
+    const fileInput = screen.getByTestId('markdown-image-input') as HTMLInputElement;
+    await user.upload(fileInput, file);
+
+    const cancelBtn = await screen.findByRole('button', { name: /^Cancel$/ });
+    await user.click(cancelBtn);
+
+    // Give React a tick to settle, then assert no insertion happened
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

@@ -2,9 +2,11 @@ import { useRef, useState } from "react";
 import { Textarea, Tabs, Box, Text } from "@mantine/core";
 import { marked } from "marked";
 import { highlightExtension } from "./markedHighlight";
+import { imageSizeExtension } from "./markedImageSize";
 import { MarkdownToolbar } from "./MarkdownToolbar";
 
 marked.use(highlightExtension);
+marked.use(imageSizeExtension);
 
 interface Props {
   value: string;
