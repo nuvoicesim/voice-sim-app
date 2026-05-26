@@ -330,14 +330,18 @@ async function handleAddInstructor(caller: any, courseId: string, body: string |
   const email = typeof payload.facultyEmail === "string" ? payload.facultyEmail.trim() : "";
   if (!email) return badRequestResponse("facultyEmail is required");
 
-  // The two professor slots are owner + co_teacher; coordinator (simulation_designer)
-  // is tracked separately and doesn't count toward the 2-professor limit.
+  // A course may have up to MAX_COURSE_INSTRUCTORS professors total
+  // (1 owner + up to MAX_COURSE_INSTRUCTORS-1 co_teachers). Coordinator
+  // (simulation_designer) is tracked separately and doesn't count toward
+  // this limit.
+  const MAX_COURSE_INSTRUCTORS = 10;
   const existing = await listCourseInstructors(dynamo, courseId);
   const ownerCount = existing.filter((i) => i.role === "owner").length;
   const coTeacherCount = existing.filter((i) => i.role === "co_teacher").length;
-  if (ownerCount >= 1 && coTeacherCount >= 1) {
+  const professorCount = ownerCount + coTeacherCount;
+  if (professorCount >= MAX_COURSE_INSTRUCTORS) {
     return conflictResponse(
-      "Course already has both professors (owner + co-teacher). Remove one first."
+      `Course already has the maximum of ${MAX_COURSE_INSTRUCTORS} instructors. Remove one first.`
     );
   }
 
