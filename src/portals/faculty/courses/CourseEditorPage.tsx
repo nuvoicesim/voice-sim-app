@@ -112,9 +112,10 @@ export default function CourseEditorPage() {
 
   // Owner privileges: course owner (a faculty professor) AND coordinator
   // (a simulation_designer who set up the course) can both manage instructors,
-  // students, and settings.
+  // students, and settings. Admin users can manage any course.
   const myRole = instructors.find((i) => i.facultyUserId === myUserId)?.role;
   const isOwner =
+    authRole === "admin" ||
     myRole === "owner" ||
     myRole === "coordinator" ||
     course.ownerFacultyId === myUserId;
@@ -679,6 +680,7 @@ function InstructorsTab({
   };
 
   // Split rows: professors (owner + co_teacher) vs coordinator (simulation_designer).
+  const MAX_COURSE_INSTRUCTORS = 10;
   const professors = instructors.filter(
     (i) => i.role === "owner" || i.role === "co_teacher"
   );
@@ -689,7 +691,7 @@ function InstructorsTab({
 
   const nextRoleLabel =
     ownerCount === 0 ? "Course Owner" : "Co-Teacher";
-  const remainingSlots = 2 - professorSlotsFilled;
+  const remainingSlots = MAX_COURSE_INSTRUCTORS - professorSlotsFilled;
 
   const handleAdd = async () => {
     if (!email.trim()) return;
@@ -718,7 +720,7 @@ function InstructorsTab({
           <Text size="xs" c="dimmed" mb="sm">
             This course was created before the simulation_designer "coordinator" role
             existed. Click below to convert yourself to coordinator. Then you can add
-            two faculty members as the actual professors.
+            faculty members as the actual professors.
           </Text>
           <Group justify="flex-end">
             <Button
@@ -755,15 +757,16 @@ function InstructorsTab({
         </Card>
       )}
 
-      {/* Add-instructor form (owner-or-coordinator only) */}
-      {isOwner && professorSlotsFilled < 2 && (
+      {/* Add-instructor form (owner-or-coordinator-or-admin only) */}
+      {isOwner && professorSlotsFilled < MAX_COURSE_INSTRUCTORS && (
         <Card withBorder>
           <Text size="sm" mb={4} fw={500}>
             Add {nextRoleLabel}
           </Text>
           <Text size="xs" c="dimmed" mb="sm">
-            {remainingSlots} of 2 professor slot{remainingSlots === 1 ? "" : "s"} remaining. Only
-            faculty/admin accounts can be added as professors.
+            {remainingSlots} of {MAX_COURSE_INSTRUCTORS} instructor slot
+            {remainingSlots === 1 ? "" : "s"} remaining. Only faculty/admin
+            accounts can be added as professors.
           </Text>
           <Group>
             <Box style={{ flex: 1 }}>
@@ -784,7 +787,7 @@ function InstructorsTab({
       {/* Professor list */}
       <Card withBorder>
         <Text size="sm" fw={600} mb="xs">
-          Course Instructors ({professorSlotsFilled} / 2)
+          Course Instructors ({professorSlotsFilled} / {MAX_COURSE_INSTRUCTORS})
         </Text>
         {professors.length === 0 ? (
           <Text size="sm" c="dimmed">
