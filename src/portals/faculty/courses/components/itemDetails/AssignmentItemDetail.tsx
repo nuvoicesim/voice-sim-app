@@ -5,20 +5,24 @@ import {
   Box,
   Button,
   Card,
+  Collapse,
   Group,
   Loader,
   Paper,
   Stack,
   Text,
   ThemeIcon,
+  UnstyledButton,
 } from "@mantine/core";
 import {
+  IconChevronDown,
+  IconChevronRight,
   IconClock,
   IconMessageCircle,
   IconStarFilled,
   IconTrophy,
 } from "@tabler/icons-react";
-import { moduleItemApi } from "../../../../../api/moduleItemApi";
+import { sessionApi } from "../../../../../api/sessionApi";
 import type {
   Session,
   SessionEvaluation,
@@ -35,9 +39,11 @@ interface Props {
   itemId: string;
   studentUserId: string;
   courseId: string;
+  assignmentId?: string | null;
 }
 
-interface BestSessionResponse {
+// Shape returned by GET /sessions/{sessionId} (sessionApi.get).
+interface SessionDetailResponse {
   session: Session | null;
   turns?: SessionTurn[];
   evaluation?: SessionEvaluation | null;
@@ -51,29 +57,55 @@ const PERF_COLORS: Record<string, string> = {
   poor: "parchment",
 };
 
+/**
+ * Faculty view of a student's VOICE assignment.
+ *
+ * Mirrors the Student History page: lists every COMPLETED simulation attempt
+ * for the selected student + assignment (source of truth = session history),
+ * not StudentItemProgress.bestSessionId. Full session detail (info + transcript
+ * + evaluation) is loaded lazily, only when an attempt is expanded.
+ *
+ * All data access here is via read-only GETs (sessionApi.listByAssignment /
+ * sessionApi.get) using local component state — no Redux session thunk, no
+ * writes, no progress/scoring/bestSessionId side effects.
+ */
 export function AssignmentItemDetail({
-  itemId,
   studentUserId,
   courseId,
+  assignmentId,
 }: Props) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<BestSessionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
 
   useEffect(() => {
+    // Guard: without an assignmentId there is nothing to query. Do NOT call the
+    // API with an undefined id.
+    if (!assignmentId) {
+      setSessions([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
-    moduleItemApi
-      .getBestSession(itemId, studentUserId)
+    sessionApi
+      .listByAssignment(assignmentId, { studentUserId })
       .then((res: unknown) => {
-        if (!cancelled) setData(res as BestSessionResponse);
+        if (cancelled) return;
+        const all = ((res as { sessions?: Session[] })?.sessions ?? []) as Session[];
+        // Match Student History: only completed attempts, ordered by attempt no.
+        const completed = all
+          .filter((s) => s.status === "completed")
+          .sort((a, b) => (a.attemptNo ?? 0) - (b.attemptNo ?? 0));
+        setSessions(completed);
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          const msg = e instanceof Error ? e.message : "Failed to load session";
-          setError(msg);
+          setError(e instanceof Error ? e.message : "Failed to load sessions");
         }
       })
       .finally(() => {
@@ -82,49 +114,20 @@ export function AssignmentItemDetail({
     return () => {
       cancelled = true;
     };
-  }, [itemId, studentUserId]);
+  }, [assignmentId, studentUserId]);
 
-  const turns = data?.turns ?? [];
-  const transcriptGroups = useMemo(() => groupTranscriptTurns(turns), [turns]);
-
-  if (loading) return <Loader size="sm" />;
-  if (error) return <Text c="terracotta">{error}</Text>;
-  if (!data?.session) {
+  if (!assignmentId) {
     return (
       <Text size="sm" c="dimmed">
-        No completed attempt yet.
+        Assignment link unavailable
       </Text>
     );
   }
-
-  const session = data.session;
-  const evaluation = data.evaluation ?? null;
-  const duration = formatDuration(session.startedAt, session.endedAt);
-  const perfColor = evaluation
-    ? PERF_COLORS[evaluation.performanceLevel?.toLowerCase()] || "parchment"
-    : "parchment";
+  if (loading) return <Loader size="sm" />;
 
   return (
-    <Stack gap="sm">
-      <Group justify="space-between" wrap="wrap">
-        <Group gap="xs" wrap="wrap">
-          <Badge color="terracotta" variant="light">
-            attempt #{session.attemptNo}
-          </Badge>
-          {evaluation?.totalScore != null && (
-            <Badge color="terracotta" variant="filled">
-              {evaluation.totalScore}/24
-            </Badge>
-          )}
-          {evaluation?.performanceLevel && (
-            <Badge color={perfColor} variant="light" radius="xl">
-              <Group gap={4} wrap="nowrap">
-                <IconStarFilled size={10} />
-                {evaluation.performanceLevel}
-              </Group>
-            </Badge>
-          )}
-        </Group>
+    <Stack gap="xs">
+      <Group justify="flex-end">
         <Button
           size="xs"
           variant="light"
@@ -134,6 +137,135 @@ export function AssignmentItemDetail({
         </Button>
       </Group>
 
+      {error ? (
+        <Text c="terracotta" size="sm">
+          {error}
+        </Text>
+      ) : sessions.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          No completed session yet
+        </Text>
+      ) : (
+        sessions.map((s) => <AttemptRow key={s.sessionId} session={s} />)
+      )}
+    </Stack>
+  );
+}
+
+/**
+ * One completed attempt. Collapsed by default; the full session detail is
+ * fetched (once) only when the row is first expanded.
+ */
+function AttemptRow({ session }: { session: Session }) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<SessionDetailResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fetched, setFetched] = useState(false);
+
+  const duration = formatDuration(session.startedAt, session.endedAt);
+
+  const handleToggle = () => {
+    const next = !open;
+    setOpen(next);
+    // Lazy-load detail only on first expand. Per-attempt failure stays local to
+    // this row so the rest of the attempts list keeps working.
+    if (next && !fetched && !loading) {
+      setLoading(true);
+      setError(null);
+      sessionApi
+        .get(session.sessionId)
+        .then((res: unknown) => {
+          setDetail(res as SessionDetailResponse);
+          setFetched(true);
+        })
+        .catch((e: unknown) => {
+          setError(
+            e instanceof Error ? e.message : "Failed to load session detail"
+          );
+        })
+        .finally(() => setLoading(false));
+    }
+  };
+
+  return (
+    <Card withBorder p="xs">
+      <UnstyledButton onClick={handleToggle} style={{ width: "100%" }}>
+        <Group justify="space-between" wrap="wrap">
+          <Group gap="xs" wrap="wrap">
+            {open ? (
+              <IconChevronDown size={14} />
+            ) : (
+              <IconChevronRight size={14} />
+            )}
+            <Badge color="terracotta" variant="light">
+              attempt #{session.attemptNo}
+            </Badge>
+            <Badge color="parchment" variant="outline" size="sm">
+              {session.status}
+            </Badge>
+            <Badge color="parchment" variant="light" size="sm">
+              {session.mode}
+            </Badge>
+          </Group>
+          <Group gap="md" wrap="wrap">
+            <Text size="xs" c="var(--claude-olive)">
+              {formatDateTime(session.startedAt)}
+              {session.endedAt ? ` → ${formatDateTime(session.endedAt)}` : ""}
+            </Text>
+            <Group gap={3} wrap="nowrap">
+              <IconClock size={12} style={{ color: "var(--claude-stone)" }} />
+              <Text size="xs" c="var(--claude-olive)">
+                {duration}
+              </Text>
+            </Group>
+          </Group>
+        </Group>
+      </UnstyledButton>
+
+      <Collapse in={open}>
+        <Box mt="xs">
+          {loading && <Loader size="sm" />}
+          {error && (
+            <Text c="terracotta" size="sm">
+              {error}
+            </Text>
+          )}
+          {!loading && !error && detail && (
+            <AttemptDetailBody detail={detail} fallbackSession={session} />
+          )}
+        </Box>
+      </Collapse>
+    </Card>
+  );
+}
+
+/**
+ * Renders the session info, evaluation, and conversation transcript for one
+ * attempt — the same content the student sees on their Session Detail page,
+ * built from the shared sessionDetail helpers/components.
+ */
+function AttemptDetailBody({
+  detail,
+  fallbackSession,
+}: {
+  detail: SessionDetailResponse;
+  fallbackSession: Session;
+}) {
+  const session = detail.session ?? fallbackSession;
+  const evaluation = detail.evaluation ?? null;
+  const transcriptGroups = useMemo(
+    () => groupTranscriptTurns(detail.turns ?? []),
+    [detail.turns]
+  );
+  const turns = detail.turns ?? [];
+  const duration = formatDuration(session.startedAt, session.endedAt);
+  const perfColor = evaluation
+    ? PERF_COLORS[evaluation.performanceLevel?.toLowerCase()] || "parchment"
+    : "parchment";
+
+  return (
+    <Stack gap="sm">
       <Card withBorder p="xs">
         <Group gap="md" wrap="wrap">
           <SessionMeta label="Started" value={formatDateTime(session.startedAt)} />
@@ -161,25 +293,44 @@ export function AssignmentItemDetail({
         </Group>
       </Card>
 
-      {evaluation?.overallExplanation && (
-        <Card withBorder p="xs">
-          <Group gap={6} mb={4}>
-            <ThemeIcon size={20} radius="md" variant="light" color="terracotta">
-              <IconTrophy size={12} />
-            </ThemeIcon>
-            <Text size="sm" fw={500}>
-              Evaluation
-            </Text>
-          </Group>
-          <Text
-            size="sm"
-            c="var(--claude-olive)"
-            style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}
-          >
-            {evaluation.overallExplanation}
+      <Card withBorder p="xs">
+        <Group gap={6} mb={4} wrap="wrap">
+          <ThemeIcon size={20} radius="md" variant="light" color="terracotta">
+            <IconTrophy size={12} />
+          </ThemeIcon>
+          <Text size="sm" fw={500}>
+            Evaluation
           </Text>
-        </Card>
-      )}
+          {evaluation?.totalScore != null && (
+            <Badge color="terracotta" variant="filled">
+              {evaluation.totalScore}/24
+            </Badge>
+          )}
+          {evaluation?.performanceLevel && (
+            <Badge color={perfColor} variant="light" radius="xl">
+              <Group gap={4} wrap="nowrap">
+                <IconStarFilled size={10} />
+                {evaluation.performanceLevel}
+              </Group>
+            </Badge>
+          )}
+        </Group>
+        {evaluation ? (
+          evaluation.overallExplanation ? (
+            <Text
+              size="sm"
+              c="var(--claude-olive)"
+              style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}
+            >
+              {evaluation.overallExplanation}
+            </Text>
+          ) : null
+        ) : (
+          <Text size="sm" c="var(--claude-stone)">
+            No evaluation available
+          </Text>
+        )}
+      </Card>
 
       <Card withBorder p="xs">
         <Group justify="space-between" mb={6}>
@@ -192,7 +343,7 @@ export function AssignmentItemDetail({
         </Group>
         {turns.length === 0 ? (
           <Text size="sm" c="dimmed">
-            No conversation turns recorded.
+            No conversation turns recorded
           </Text>
         ) : (
           <Box style={{ maxHeight: 420, overflowY: "auto" }} pr={4}>

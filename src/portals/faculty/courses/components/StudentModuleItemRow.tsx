@@ -25,6 +25,7 @@ interface Props {
     itemType: string;
     title: string;
     position: number;
+    payload?: { assignmentId?: string } | null;
   };
   studentUserId: string;
   courseId: string;
@@ -98,6 +99,7 @@ function renderBody(
           itemId={item.moduleItemId}
           studentUserId={studentUserId}
           courseId={courseId}
+          assignmentId={item.payload?.assignmentId}
         />
       );
     case "survey":
