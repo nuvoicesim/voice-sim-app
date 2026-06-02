@@ -28,6 +28,7 @@ import CreateAssignment from './portals/faculty/CreateAssignment';
 import AssignmentManagement from './portals/faculty/AssignmentManagement';
 import StudentsDataPage from './portals/faculty/StudentsDataPage';
 import AnalysisPage from './portals/faculty/AnalysisPage';
+import AnalysisCourseDashboardPage from './portals/faculty/AnalysisCourseDashboardPage';
 import SceneManagement from './portals/faculty/SceneManagement';
 import PatientProfilesPage from './portals/simulation-designer/PatientProfilesPage';
 import UnityBuildsPage from './portals/simulation-designer/UnityBuildsPage';
@@ -139,6 +140,7 @@ function App() {
                   <Route path="assignments" element={<AssignmentManagement />} />
                   <Route path="students" element={<StudentsDataPage />} />
                   <Route path="analysis" element={<AnalysisPage />} />
+                  <Route path="analysis/:courseId" element={<AnalysisCourseDashboardPage />} />
                   <Route path="*" element={<Navigate to="dashboard" replace />} />
                 </Routes>
               </PortalLayout>

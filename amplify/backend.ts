@@ -432,6 +432,15 @@ backend.sessionFunction.addEnvironment(
 );
 backend.sessionFunction.addEnvironment("EVENT_LOG_TABLE_NAME", eventLogTable.tableName);
 
+// Read-only access for the new GET /sessions/{sessionId}/evidence endpoint.
+// session-function never writes to this table — writes remain the sole
+// responsibility of llm-scoring-function (phase1-rubric.ts / phase2-evidence.ts).
+sessionEvidenceTable.grantReadData(backend.sessionFunction.resources.lambda);
+backend.sessionFunction.addEnvironment(
+  "SESSION_EVIDENCE_TABLE_NAME",
+  sessionEvidenceTable.tableName
+);
+
 // Extend llm-scoring-function to mirror AI feedback into ReviewerFeedback after writing SessionEvaluation.
 moduleItemTable.grantReadData(backend.llmScoringFunction.resources.lambda);
 studentItemProgressTable.grantReadWriteData(backend.llmScoringFunction.resources.lambda);
@@ -862,6 +871,11 @@ const sessionCompletePath = sessionItemPath.addResource("complete");
 sessionCompletePath.addMethod("PUT", sessionLambdaIntegration, publicMethodOptions);
 const sessionRuntimeTokenPath = sessionItemPath.addResource("runtime-token");
 sessionRuntimeTokenPath.addMethod("POST", sessionLambdaIntegration, cognitoMethodOptions);
+// /sessions/{sessionId}/evidence — read-only faculty/admin view of
+// SessionEvidence rows. Surfaces cue_pressed interactionEvents written by
+// /llm-scoring; no write side effects.
+const sessionEvidencePath = sessionItemPath.addResource("evidence");
+sessionEvidencePath.addMethod("GET", sessionLambdaIntegration, cognitoMethodOptions);
 const sessionTaskProgressPath = sessionItemPath.addResource("task-progress");
 sessionTaskProgressPath.addMethod("GET", sessionLambdaIntegration, publicMethodOptions);
 const sessionTaskProgressItemPath = sessionTaskProgressPath.addResource("{progressKey}");

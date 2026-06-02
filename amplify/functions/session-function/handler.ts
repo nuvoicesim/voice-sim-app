@@ -23,7 +23,7 @@ import {
   RuntimeTokenError,
 } from "../shared";
 import { extractCallerIdentity, requireRole, type CallerIdentity } from "../shared/auth-middleware";
-import { ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, type ScanCommandOutput } from "@aws-sdk/lib-dynamodb";
 
 const SESSION_TABLE = process.env.TABLE_NAME;
 const ASSIGNMENT_TABLE = process.env.ASSIGNMENT_TABLE_NAME;
@@ -35,6 +35,11 @@ const EVALUATION_TABLE = process.env.EVALUATION_TABLE_NAME;
 const SESSION_TASK_PROGRESS_TABLE = process.env.SESSION_TASK_PROGRESS_TABLE_NAME;
 const SESSION_TASK_PROGRESS_BY_SESSION_INDEX =
   process.env.SESSION_TASK_PROGRESS_BY_SESSION_INDEX_NAME ?? "bySessionProgressKey";
+// Read-only access to SessionEvidence so faculty can render cue support
+// access events recorded by /llm-scoring. The session-function never writes
+// to this table — writes remain the sole responsibility of
+// llm-scoring-function (phase1-rubric.ts / phase2-evidence.ts).
+const SESSION_EVIDENCE_TABLE = process.env.SESSION_EVIDENCE_TABLE_NAME;
 // Course-LMS integration:
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME;
 const STUDENT_ITEM_PROGRESS_TABLE = process.env.STUDENT_ITEM_PROGRESS_TABLE_NAME;
@@ -288,6 +293,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         });
         throw error;
       }
+    }
+
+    // GET /sessions/{sessionId}/evidence — read-only faculty/admin view of
+    // SessionEvidence rows written by /llm-scoring. Surfaces cue_pressed
+    // interactionEvents for the existing transcript display. No write side
+    // effects; does not change the GET /sessions/{sessionId} payload.
+    if (method === "GET" && pathParams?.sessionId && resource.endsWith("/evidence")) {
+      const caller = await extractCallerIdentity(event);
+      const authError = requireRole(caller, ["faculty", "simulation_designer", "admin"]);
+      if (authError) return authError;
+      return await handleGetSessionEvidence(pathParams.sessionId, caller!);
     }
 
     // GET /sessions/{sessionId}
@@ -632,6 +648,155 @@ async function handleGetSession(
     turns,
     evaluation,
   });
+}
+
+/**
+ * Read-only faculty/admin view of SessionEvidence rows for one session.
+ *
+ * Returns the persisted evidence rows /llm-scoring writes for this session,
+ * including rawEvidencePayload which carries studyTaskContext.interactionEvents
+ * (cue_pressed) entries the faculty UI renders as Cue Support Access events.
+ *
+ * Auth contract (kept consistent with handleGetSession's faculty access):
+ *   - Caller role is already gated to faculty/simulation_designer/admin by
+ *     the route dispatch above (students cannot call this endpoint).
+ *   - Faculty visibility across courses mirrors the existing session/turns
+ *     visibility pattern (handleGetSession does not enforce per-course
+ *     instructor checks today). A per-course instructor check could be
+ *     layered later but is not added in this round to avoid changing
+ *     existing faculty access semantics.
+ *
+ * Non-existent sessions yield 404 to match handleGetSession. Sessions with
+ * no evidence rows yield 200 + empty array, not 404, so the faculty UI can
+ * render "No cue events recorded" without treating it as an error.
+ */
+async function handleGetSessionEvidence(
+  sessionId: string,
+  caller: CallerIdentity
+) {
+  // Faculty/admin/simulation_designer reach this. Re-checking just to keep
+  // the function self-documenting; the route dispatch already enforced role.
+  if (
+    caller.role !== "faculty" &&
+    caller.role !== "simulation_designer" &&
+    caller.role !== "admin"
+  ) {
+    return createResponse(HTTP_STATUS.FORBIDDEN, {
+      error: "Insufficient role to view session evidence",
+    });
+  }
+
+  const session = await getItem(SESSION_TABLE, { sessionId }, dynamo);
+  if (!session) return notFoundResponse("Session not found");
+
+  // SessionEvidence rows are keyed by evidenceId; sessionId is a normalized
+  // column. There's no GSI today, so use a filtered Scan — same pattern the
+  // analytics-function handler uses. SessionEvidence is small relative to
+  // SimulationSession (one row per Phase 1 task finalize + one per Phase 2
+  // task finalize), so this is acceptable for V1.1 read traffic.
+  //
+  // Pagination: a single Scan returns at most one page of items (DynamoDB
+  // caps page size at ~1 MB pre-filter, not post-filter). To guarantee we
+  // surface every evidence row for the session, loop until LastEvaluatedKey
+  // is absent. Without this loop, a session sitting in a later Scan page
+  // would silently appear evidence-less to faculty.
+  if (!SESSION_EVIDENCE_TABLE) {
+    return createResponse(HTTP_STATUS.OK, { evidence: [] });
+  }
+
+  const evidenceRows: Record<string, unknown>[] = [];
+  try {
+    // Defensive cap: a single session is expected to produce <20 evidence
+    // rows in normal operation (one per Phase 1 task finalize + one per
+    // Phase 2 task finalize). The page cap prevents an unexpected runaway
+    // Scan if SessionEvidence ever grows pathologically large.
+    const MAX_PAGES = 50;
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const scanResult: ScanCommandOutput = await dynamo.send(
+        new ScanCommand({
+          TableName: SESSION_EVIDENCE_TABLE,
+          FilterExpression: "sessionId = :sid",
+          ExpressionAttributeValues: { ":sid": sessionId },
+          ExclusiveStartKey: exclusiveStartKey,
+        })
+      );
+      if (Array.isArray(scanResult.Items)) {
+        for (const item of scanResult.Items) {
+          evidenceRows.push(item as Record<string, unknown>);
+        }
+      }
+      exclusiveStartKey = scanResult.LastEvaluatedKey;
+      if (!exclusiveStartKey) break;
+    }
+    // If LastEvaluatedKey is still set after the page cap, the scan stopped
+    // mid-table and `evidenceRows` is a partial view. Returning 200 with
+    // truncated evidence would mislead faculty into believing those rows are
+    // the complete set. Surface the truncation as a 500 instead so the
+    // frontend treats it the same as any other backend evidence failure
+    // ("Cue evidence unavailable") rather than rendering a deceptive subset.
+    if (exclusiveStartKey) {
+      console.error("[session-function] SessionEvidence scan exceeded page cap", {
+        sessionId,
+        maxPages: MAX_PAGES,
+      });
+      return serverErrorResponse("Session evidence scan exceeded pagination limit");
+    }
+  } catch (e) {
+    // Surface the failure rather than hiding it as "no evidence". Returning
+    // an empty array here would mislead faculty into believing the student
+    // had zero cue events when in fact the read failed. Frontend treats a
+    // non-2xx response as "evidence unavailable" and still renders the
+    // transcript.
+    console.error("[session-function] SessionEvidence scan failed", {
+      sessionId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return serverErrorResponse("Failed to read session evidence");
+  }
+
+  // Project only the fields the faculty UI consumes. rawEvidencePayload is
+  // returned as-is so the frontend can extract studyTaskContext.interactionEvents.
+  // Keeping the projection explicit avoids leaking unknown future columns.
+  const evidence = evidenceRows
+    .map((row) => {
+      const evidenceId = row.evidenceId;
+      const submittedAt = row.submittedAt;
+      const createdAt = row.createdAt;
+      if (
+        typeof evidenceId !== "string" ||
+        typeof submittedAt !== "string" ||
+        typeof createdAt !== "string"
+      ) {
+        return null;
+      }
+      return {
+        evidenceId,
+        sessionId,
+        assignmentId:
+          typeof row.assignmentId === "string" ? row.assignmentId : "",
+        studentUserId:
+          typeof row.studentUserId === "string" ? row.studentUserId : "",
+        phaseId: typeof row.phaseId === "string" ? row.phaseId : "",
+        taskType: typeof row.taskType === "string" ? row.taskType : null,
+        sectionId: typeof row.sectionId === "string" ? row.sectionId : null,
+        taskId: typeof row.taskId === "string" ? row.taskId : null,
+        patientProfileId:
+          typeof row.patientProfileId === "string" ? row.patientProfileId : null,
+        rawEvidencePayload:
+          row.rawEvidencePayload && typeof row.rawEvidencePayload === "object"
+            ? row.rawEvidencePayload
+            : null,
+        submittedAt,
+        createdAt,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    // Stable chronological order on submittedAt (oldest first); the UI can
+    // re-order if needed.
+    .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+
+  return createResponse(HTTP_STATUS.OK, { evidence });
 }
 
 function normalizeIsoTimestamp(value: unknown): string | null {
