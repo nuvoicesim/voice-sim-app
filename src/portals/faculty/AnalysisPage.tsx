@@ -1,104 +1,134 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
 import {
-  Text, Stack, SimpleGrid, Paper, Box, Group,
-  ThemeIcon, Skeleton, RingProgress, Center,
-} from '@mantine/core';
+  Badge,
+  Card,
+  Group,
+  Loader,
+  SimpleGrid,
+  Stack,
+  Text,
+  ThemeIcon,
+} from "@mantine/core";
+import { IconBook, IconChartBar } from "@tabler/icons-react";
 import {
-  IconFilter, IconActivity, IconCircleCheck,
-} from '@tabler/icons-react';
-import { analyticsApi } from '../../api/analyticsApi';
-import { PageHeader, SectionCard } from '../../components/design';
+  fetchCourses,
+  selectCourses,
+  selectCoursesLoading,
+} from "../../slices/courseSlice";
+import type { AppDispatch } from "../../store";
+import { PageHeader, EmptyState } from "../../components/design";
 
-function LoadingSkeleton() {
-  return (
-    <Stack gap="xl">
-      <Box>
-        <Skeleton height={28} width="30%" mb={8} />
-        <Skeleton height={14} width="50%" />
-      </Box>
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <Paper key={i} radius="lg" p="lg" withBorder>
-            <Skeleton height={16} width="40%" mb="lg" />
-            <Center><Skeleton circle height={120} /></Center>
-            <Skeleton height={12} width="60%" mt="lg" />
-          </Paper>
-        ))}
-      </SimpleGrid>
-    </Stack>
-  );
-}
+/**
+ * Faculty Analysis landing page (V1, frontend-only).
+ *
+ * Replaces the previous global cohort funnel with a course-card grid that
+ * lists only the courses the current faculty user owns or co-teaches. The
+ * underlying data source is the same `GET /courses` endpoint the existing
+ * /faculty/courses page calls — backend already filters to the caller's
+ * CourseInstructor rows for faculty/simulation_designer roles.
+ *
+ * Clicking a card navigates to the course-specific Analysis dashboard at
+ * /faculty/analysis/:courseId.
+ *
+ * No backend, schema, API, or Amplify change. Uses existing courseSlice
+ * actions and existing design-system components only.
+ */
+
+const STATUS_COLOR: Record<string, string> = {
+  published: "terracotta",
+  archived: "parchment",
+  draft: "parchment",
+};
 
 export default function AnalysisPage() {
-  const [cohortData, setCohortData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const dispatch = useDispatch<AppDispatch>();
+  const navigate = useNavigate();
+  const courses = useSelector(selectCourses);
+  const loading = useSelector(selectCoursesLoading);
 
   useEffect(() => {
-    analyticsApi.cohort()
-      .then((cohort) => {
-        setCohortData(cohort);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <LoadingSkeleton />;
-
-  const total = cohortData?.totalSessions ?? 0;
-  const completed = cohortData?.completedSessions ?? 0;
-  const completionRate = cohortData?.completionRate ?? 0;
+    dispatch(fetchCourses());
+  }, [dispatch]);
 
   return (
     <Stack gap="xl">
       <PageHeader
         title="Analysis"
-        subtitle="Cohort performance analysis and insights"
+        subtitle="Select a course to open a course-specific Analysis dashboard. Only courses available to your account are shown."
       />
 
-      <SimpleGrid cols={1} spacing="lg">
-        <SectionCard
-          title={
-            <Group gap="xs">
-              <ThemeIcon size={26} radius="md" variant="light" color="terracotta">
-                <IconFilter size={14} />
+      {loading && <Loader color="terracotta" />}
+
+      {!loading && courses.length === 0 && (
+        <EmptyState
+          icon={<IconChartBar size={28} />}
+          title="No courses available for analysis"
+          description="Once you own or co-teach a course, it will appear here. Create or join a course from the Courses page."
+        />
+      )}
+
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+        {courses.map((c) => (
+          <Card
+            key={c.courseId}
+            radius="lg"
+            p="lg"
+            style={{
+              cursor: "pointer",
+              background: "var(--claude-ivory)",
+              border: "1px solid var(--claude-border-cream)",
+              boxShadow: "var(--claude-shadow-whisper)",
+              transition: "box-shadow 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow =
+                "0 0 0 1px var(--claude-terracotta), var(--claude-shadow-whisper)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = "var(--claude-shadow-whisper)";
+            }}
+            onClick={() => navigate(`/faculty/analysis/${c.courseId}`)}
+          >
+            <Group gap="sm" mb="xs" wrap="nowrap">
+              <ThemeIcon size={28} radius="md" variant="light" color="terracotta">
+                <IconBook size={16} />
               </ThemeIcon>
-              <Text fw={500} size="md" c="var(--claude-near-black)">Completion Funnel</Text>
+              <Text
+                fw={500}
+                c="var(--claude-near-black)"
+                style={{
+                  fontFamily: "Georgia, serif",
+                  fontSize: "1.05rem",
+                  flex: 1,
+                  minWidth: 0,
+                }}
+                lineClamp={1}
+              >
+                {c.title}
+              </Text>
+              <Badge
+                color={STATUS_COLOR[c.status] || "parchment"}
+                variant={c.status === "published" ? "filled" : "light"}
+                size="sm"
+              >
+                {c.status}
+              </Badge>
             </Group>
-          }
-        >
-          <Stack align="center" gap="md">
-            <RingProgress
-              size={140}
-              thickness={14}
-              roundCaps
-              sections={[{ value: completionRate, color: 'var(--claude-terracotta)' }]}
-              label={
-                <Stack align="center" gap={0}>
-                  <Text fw={500} size="xl" c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>
-                    {completionRate}%
-                  </Text>
-                  <Text size="xs" c="var(--claude-stone)">Rate</Text>
-                </Stack>
-              }
-            />
-            <SimpleGrid cols={2} spacing="md" style={{ width: '100%' }}>
-              <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)', textAlign: 'center' }}>
-                <Group gap={4} justify="center" mb={2}>
-                  <IconActivity size={13} style={{ color: 'var(--claude-stone)' }} />
-                  <Text size="xs" c="var(--claude-olive)" fw={500}>Total</Text>
-                </Group>
-                <Text fw={500} size="lg" c="var(--claude-near-black)" style={{ fontFamily: 'Georgia, serif' }}>{total}</Text>
-              </Paper>
-              <Paper radius="md" p="sm" style={{ background: 'var(--claude-parchment)', textAlign: 'center' }}>
-                <Group gap={4} justify="center" mb={2}>
-                  <IconCircleCheck size={13} style={{ color: 'var(--claude-terracotta)' }} />
-                  <Text size="xs" c="var(--claude-olive)" fw={500}>Completed</Text>
-                </Group>
-                <Text fw={500} size="lg" c="var(--claude-terracotta)" style={{ fontFamily: 'Georgia, serif' }}>{completed}</Text>
-              </Paper>
-            </SimpleGrid>
-          </Stack>
-        </SectionCard>
+            <Text size="sm" c="var(--claude-olive)" lineClamp={2} lh={1.6}>
+              {c.description || "No description"}
+            </Text>
+            <Group justify="space-between" align="center" mt="md">
+              <Text size="xs" c="var(--claude-stone)">
+                Created {new Date(c.createdAt).toLocaleDateString()}
+              </Text>
+              <Text size="xs" c="var(--claude-terracotta)" fw={500}>
+                Open Analysis →
+              </Text>
+            </Group>
+          </Card>
+        ))}
       </SimpleGrid>
     </Stack>
   );
