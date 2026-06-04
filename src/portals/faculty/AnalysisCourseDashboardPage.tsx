@@ -122,6 +122,91 @@ function classifyModuleStatus(
   return "not_started";
 }
 
+// ───────────── Relevant-path (assigned-branch) filtering ─────────────
+//
+// DISPLAY-ONLY. A minimal, self-contained port of the off-branch item-hiding
+// rule the student workflow already applies in
+// src/portals/student/courses/StudentCoursePage.tsx (NOT imported — that file
+// is intentionally left untouched). For counter-balanced / group-specific
+// modules (e.g. Group A vs Group B items in Module 2), a student is assigned
+// only ONE branch and never sees the other branch's items, so the faculty
+// dashboard must classify Started/Completed over each student's RELEVANT items
+// rather than every raw item in the module.
+//
+// This NEVER changes any locked/unlocked/completed state and writes nothing —
+// it only decides which items count toward this dashboard's per-module
+// classification. It is intentionally a subset of the student gating evaluator
+// (group_in + all_of + after_item hidden-propagation only); lock/unlock and
+// consent-driven hiding are out of scope for these display counts.
+
+/** Minimal structural shape of an item's `gating` (ModuleItem.gating is `any`).
+ *  The codebase uses `kind`; `type` is accepted defensively. */
+interface ItemGating {
+  kind?: string;
+  type?: string;
+  groups?: string[];
+  clauses?: ItemGating[];
+  moduleItemId?: string;
+}
+
+/**
+ * True when `gating` places the item on a counter-balanced branch the student
+ * is NOT in (so it is excluded from that student's relevant path). Mirrors the
+ * student page's `hidden` rule:
+ *   - no gating / open / after_module / unknown → not off-branch (keep)
+ *   - group_in → off-branch only when the student HAS group keys and none match
+ *     (a not-yet-randomized student keeps the item pending, never hidden)
+ *   - all_of   → off-branch if ANY child clause hides it
+ *   - after_item → inherits the prerequisite item's off-branch status
+ * `gatingById` maps moduleItemId → that item's gating, for after_item chains.
+ */
+function isGatingOffBranch(
+  gating: ItemGating | null | undefined,
+  myGroupKeys: string[],
+  gatingById: Record<string, ItemGating | null | undefined>,
+  depth = 0
+): boolean {
+  if (!gating || depth > 20) return false;
+  const kind = gating.kind ?? gating.type;
+
+  if (kind === "group_in") {
+    // Not yet randomized → item is pending for this student, NOT off-branch.
+    if (myGroupKeys.length === 0) return false;
+    const allowed = gating.groups ?? [];
+    return !allowed.some((k) => myGroupKeys.includes(k));
+  }
+
+  if (kind === "all_of") {
+    return (gating.clauses ?? []).some((clause) =>
+      isGatingOffBranch(clause, myGroupKeys, gatingById, depth + 1)
+    );
+  }
+
+  if (kind === "after_item") {
+    const prereqGating = gating.moduleItemId
+      ? gatingById[gating.moduleItemId]
+      : undefined;
+    return isGatingOffBranch(prereqGating, myGroupKeys, gatingById, depth + 1);
+  }
+
+  return false;
+}
+
+/**
+ * A student's relevant assigned-path items = all module items minus those that
+ * are off-branch for the student's group keys. Faculty display classification
+ * only — never affects real progress/lock state.
+ */
+function relevantItemsForStudent(
+  items: ModuleItem[],
+  myGroupKeys: string[],
+  gatingById: Record<string, ItemGating | null | undefined>
+): ModuleItem[] {
+  return items.filter(
+    (it) => !isGatingOffBranch(it.gating, myGroupKeys, gatingById)
+  );
+}
+
 function moduleStatusBadge(status: ModuleStatus): {
   label: string;
   color: string;
@@ -477,6 +562,28 @@ export default function AnalysisCourseDashboardPage() {
       }
     }
 
+    // For RELEVANT-PATH classification we need ALL of a student's group keys,
+    // not the single display key above. A student may hold several group
+    // assignments (e.g. course-scoped + module-scoped randomizers), and the
+    // student workflow's relevance check (selectMyGroupKeysForCourse) is
+    // scopeKey-agnostic — it considers every group key. Mirror that here.
+    const groupKeysByStudent = new Map<string, string[]>();
+    for (const g of groupAssignments) {
+      const keys = groupKeysByStudent.get(g.studentUserId) ?? [];
+      if (!keys.includes(g.groupKey)) keys.push(g.groupKey);
+      groupKeysByStudent.set(g.studentUserId, keys);
+    }
+
+    // moduleItemId → that item's gating, so the relevance filter can resolve
+    // after_item branch-propagation. Derived from currently-loaded items;
+    // incremental item loading simply means a later memo pass sees more.
+    const gatingById: Record<string, ItemGating | null | undefined> = {};
+    for (const m of modules) {
+      for (const it of itemsByModule[m.moduleId] || []) {
+        gatingById[it.moduleItemId] = it.gating;
+      }
+    }
+
     // A student's progress is "loaded" only once every currently-known item
     // for the course has a settled pair for that student. We additionally
     // require that each module's items have actually finished loading
@@ -493,12 +600,30 @@ export default function AnalysisCourseDashboardPage() {
       const studentEmail =
         e.studentEmail ?? resolvedEmails[e.studentUserId] ?? null;
       const progressMap = progressByStudent[e.studentUserId] || {};
+      const myGroupKeys = groupKeysByStudent.get(e.studentUserId) ?? [];
       const moduleStatuses: Record<string, ModuleStatus> = {};
       let lastActivityAt: string | null = null;
       let allPairsSettled = true;
       for (const m of modules) {
         const items = itemsByModule[m.moduleId] || [];
-        moduleStatuses[m.moduleId] = classifyModuleStatus(items, progressMap);
+        // Classify over the student's RELEVANT (assigned-branch) items only, so
+        // off-branch group-specific items the student is never assigned cannot
+        // make a counter-balanced module permanently "incomplete". With no
+        // group keys yet, nothing is off-branch → identical to the raw set.
+        // If every item is off-branch, relevantItems is empty and
+        // classifyModuleStatus returns "not_started" (never inflated).
+        const relevantItems = relevantItemsForStudent(
+          items,
+          myGroupKeys,
+          gatingById
+        );
+        moduleStatuses[m.moduleId] = classifyModuleStatus(
+          relevantItems,
+          progressMap
+        );
+        // Progress-loading tracking (P1/P2) still iterates ALL items: the N×M
+        // effect fetches every pair, so "loaded" must wait for every pair
+        // (off-branch pairs settle as null) — preserved unchanged below.
         for (const it of items) {
           if (
             !settledPairsRef.current.has(
@@ -668,15 +793,15 @@ export default function AnalysisCourseDashboardPage() {
         />
       </SimpleGrid>
 
-      {/* ── Raw Module Progress (counts per module) ──
-          Wording is intentionally "Raw" rather than "Module completion" or
-          "Official Module Progress". This card aggregates per-item
-          StudentItemProgress.state across every item in each module, with no
-          awareness of randomizer-skipped items, gated branches,
-          consent-gated items, or group-assignment-specific items. For a
-          randomized / branch-locked course, a module that the student is
-          not expected to visit will still register as "Not started" here.
-          The tooltip below makes this explicit. */}
+      {/* ── Module Progress (counts per module) ──
+          Started/Completed are computed over each student's RELEVANT assigned
+          path: off-branch group-specific items (counter-balanced Group A / B
+          items the student is never assigned) are excluded via the relevant-
+          path filter, so a branched module is not permanently "Not started" /
+          "incomplete" for every student. When a student has no group-assignment
+          data yet (e.g. not yet randomized), the full raw item set is used.
+          This is a display-only classification, not the official
+          course-completion logic. The tooltip below says so. */}
       <SectionCard
         title={
           <Group gap="xs">
@@ -684,13 +809,13 @@ export default function AnalysisCourseDashboardPage() {
               <IconChartBar size={14} />
             </ThemeIcon>
             <Tooltip
-              label="Based on available item progress records. May not reflect hidden, randomized, consent-gated, or group-specific item relevance. Not equivalent to official course-completion logic."
+              label="Module progress is calculated using each student's relevant assigned path when group-assignment data is available. Raw item progress may differ for randomized or group-specific modules. Not equivalent to official course-completion logic."
               withinPortal
               multiline
               w={320}
             >
               <Text fw={500} size="md" c="var(--claude-near-black)">
-                Raw Module Progress (Item Progress Summary)
+                Module Progress (Relevant Assigned Path)
               </Text>
             </Tooltip>
           </Group>
@@ -859,13 +984,13 @@ function StudentsByModuleProgress({
             <IconUsers size={14} />
           </ThemeIcon>
           <Tooltip
-            label="Based on available item progress records. May not reflect hidden, randomized, consent-gated, or group-specific item relevance. Not equivalent to official course-completion logic."
+            label="Module progress is calculated using each student's relevant assigned path when group-assignment data is available. Raw item progress may differ for randomized or group-specific modules. Not equivalent to official course-completion logic."
             withinPortal
             multiline
             w={320}
           >
             <Text fw={500} size="md" c="var(--claude-near-black)">
-              Students by Module Progress (raw item progress)
+              Students by Module Progress (relevant assigned path)
             </Text>
           </Tooltip>
         </Group>
