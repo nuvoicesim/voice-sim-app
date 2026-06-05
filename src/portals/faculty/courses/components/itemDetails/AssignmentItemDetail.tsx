@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   ThemeIcon,
+  Tooltip,
   UnstyledButton,
 } from "@mantine/core";
 import {
@@ -56,6 +57,100 @@ const PERF_COLORS: Record<string, string> = {
   "needs improvement": "parchment",
   poor: "parchment",
 };
+
+// ───────────── Verbal engagement (interaction-length) metrics ─────────────
+//
+// DISPLAY-ONLY, faculty-only. Derived synchronously (useMemo) from the session
+// `turns` already lazy-loaded when an attempt is expanded — no new API calls,
+// no new effects. These describe interaction LENGTH / verbal participation
+// only: NOT a clinical quality score, rubric score, grade, or goal-achievement
+// measure. Intended to help faculty spot sessions where a student answered the
+// virtual patient with very brief responses (e.g. "yes", "okay") and decide
+// whether to read the transcript.
+
+// Preliminary thresholds on AVERAGE words per student response. Constants here;
+// may become configurable in a later version.
+const ENGAGEMENT_THRESHOLDS = { briefMax: 3, extendedMin: 9 };
+// A single student response of this many words or fewer counts as "short".
+const SHORT_RESPONSE_MAX_WORDS = 3;
+
+/** Word count: trim, split on whitespace, drop empty tokens; 0 for empty/nullish. */
+function wordCount(text: string | null | undefined): number {
+  return (text ?? "").trim().split(/\s+/).filter(Boolean).length;
+}
+
+interface EngagementMetrics {
+  /** Turns with non-empty student (userText) speech. */
+  studentResponses: number;
+  totalStudentWords: number;
+  /** null when there are no student responses (avoid divide-by-zero). */
+  avgWordsPerResponse: number | null;
+  /** Student responses of SHORT_RESPONSE_MAX_WORDS words or fewer. */
+  shortResponses: number;
+  longestResponseWords: number;
+}
+
+/**
+ * Interaction-length metrics over a session's turns. A "student response" is a
+ * turn whose userText is non-empty; patient (modelText) turns are intentionally
+ * NOT counted or surfaced in V1.1.
+ */
+function computeEngagement(turns: SessionTurn[]): EngagementMetrics {
+  let studentResponses = 0;
+  let totalStudentWords = 0;
+  let shortResponses = 0;
+  let longestResponseWords = 0;
+  for (const t of turns) {
+    if ((t.userText ?? "").trim() === "") continue;
+    const wc = wordCount(t.userText);
+    studentResponses += 1;
+    totalStudentWords += wc;
+    if (wc <= SHORT_RESPONSE_MAX_WORDS) shortResponses += 1;
+    if (wc > longestResponseWords) longestResponseWords = wc;
+  }
+  return {
+    studentResponses,
+    totalStudentWords,
+    avgWordsPerResponse:
+      studentResponses > 0 ? totalStudentWords / studentResponses : null,
+    shortResponses,
+    longestResponseWords,
+  };
+}
+
+/**
+ * Neutral interaction-length label from average words per response. Wording is
+ * deliberately Brief / Moderate / Extended — never Poor/Good/Excellent — so it
+ * cannot read as a quality grade. Returns null when there is no data.
+ */
+function engagementLabel(avgWordsPerResponse: number | null): string | null {
+  if (avgWordsPerResponse == null) return null;
+  if (avgWordsPerResponse <= ENGAGEMENT_THRESHOLDS.briefMax)
+    return "Brief responses";
+  if (avgWordsPerResponse >= ENGAGEMENT_THRESHOLDS.extendedMin)
+    return "Extended responses";
+  return "Moderate responses";
+}
+
+/**
+ * Subtle red / orange / green for the interaction-length chip, ALWAYS paired
+ * with the text label (never color alone, so it stays colour-blind-safe). This
+ * encodes response LENGTH only — shorter average response → warmer colour — and
+ * is NOT a clinical quality score; wording stays Brief / Moderate / Extended.
+ */
+function engagementColor(label: string | null): string {
+  switch (label) {
+    case "Brief responses":
+      return "red";
+    case "Moderate responses":
+      return "orange";
+    case "Extended responses":
+      return "green";
+    default:
+      // "Not enough data" → neutral.
+      return "parchment";
+  }
+}
 
 /**
  * Faculty view of a student's VOICE assignment.
@@ -258,6 +353,13 @@ function AttemptDetailBody({
     () => groupTranscriptTurns(detail.turns ?? []),
     [detail.turns]
   );
+  // Verbal-engagement metrics: pure, synchronous derivation from the turns
+  // already loaded for this attempt — no extra fetch, no new effect.
+  const engagement = useMemo(
+    () => computeEngagement(detail.turns ?? []),
+    [detail.turns]
+  );
+  const engagementChip = engagementLabel(engagement.avgWordsPerResponse);
   const turns = detail.turns ?? [];
   const duration = formatDuration(session.startedAt, session.endedAt);
   const perfColor = evaluation
@@ -330,6 +432,84 @@ function AttemptDetailBody({
             No evaluation available
           </Text>
         )}
+      </Card>
+
+      {/* Verbal Engagement — DISPLAY-ONLY interaction-length indicator. A small
+          red/orange/green status DOT is PAIRED with the always-visible text
+          label + a disclaimer (never colour alone) and conveys response LENGTH
+          only — it is not the rubric / evaluation score above. */}
+      <Card withBorder p="xs">
+        <Group gap={6} mb={4} wrap="wrap">
+          <ThemeIcon size={20} radius="md" variant="light" color="parchment">
+            <IconMessageCircle size={12} />
+          </ThemeIcon>
+          <Text size="sm" fw={500}>
+            Verbal Engagement
+          </Text>
+          <Tooltip
+            label="This color indicates student response length only. It helps identify sessions with very brief responses and is not a clinical quality score."
+            withinPortal
+            multiline
+            w={300}
+          >
+            <Group gap={6} wrap="nowrap" style={{ cursor: "default" }}>
+              {/* Small circular status dot — colour comes from response length;
+                  the text label beside it is always visible (never colour alone). */}
+              <Box
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  backgroundColor: `var(--mantine-color-${engagementColor(
+                    engagementChip
+                  )}-filled)`,
+                }}
+              />
+              <Text size="xs" fw={500} c="var(--claude-near-black)">
+                {engagementChip ?? "Not enough data"}
+              </Text>
+            </Group>
+          </Tooltip>
+        </Group>
+        <Text size="xs" c="var(--claude-stone)" mb={8}>
+          Based on student response length in this session. This is not a
+          clinical quality score.
+        </Text>
+        <Group gap="md" wrap="wrap">
+          <SessionMeta
+            label="Avg words / response"
+            value={
+              engagement.avgWordsPerResponse == null
+                ? "—"
+                : engagement.avgWordsPerResponse.toFixed(1)
+            }
+          />
+          <SessionMeta
+            label="Short responses (≤3 words)"
+            value={
+              engagement.studentResponses === 0
+                ? "—"
+                : String(engagement.shortResponses)
+            }
+          />
+          <SessionMeta
+            label="Student responses"
+            value={String(engagement.studentResponses)}
+          />
+          <SessionMeta
+            label="Total student words"
+            value={String(engagement.totalStudentWords)}
+          />
+          <SessionMeta
+            label="Longest response (words)"
+            value={
+              engagement.studentResponses === 0
+                ? "—"
+                : String(engagement.longestResponseWords)
+            }
+          />
+        </Group>
       </Card>
 
       <Card withBorder p="xs">

@@ -207,4 +207,92 @@ describe("AssignmentItemDetail", () => {
     // attempts list remains visible
     expect(screen.getByText(/attempt #1/i)).toBeInTheDocument();
   });
+
+  it("shows verbal engagement metrics computed from student responses", async () => {
+    vi.mocked(sessionApi.listByAssignment).mockResolvedValue({
+      sessions: [
+        {
+          sessionId: "s-1",
+          attemptNo: 1,
+          mode: "assessment",
+          status: "completed",
+          startedAt: "2026-02-01T10:00:00Z",
+          endedAt: "2026-02-01T10:10:00Z",
+        },
+      ],
+    } as any);
+    vi.mocked(sessionApi.get).mockResolvedValue({
+      session: {
+        sessionId: "s-1",
+        attemptNo: 1,
+        mode: "assessment",
+        status: "completed",
+        startedAt: "2026-02-01T10:00:00Z",
+        endedAt: "2026-02-01T10:10:00Z",
+      },
+      // 3 student responses: "yes" (1 word), "okay" (1), 10-word reply.
+      // total 12 words → avg 4.0 → "Moderate responses"; 2 short (<=3 words).
+      turns: [
+        { turnIndex: 0, userText: "yes", modelText: "How do you feel?" },
+        { turnIndex: 1, userText: "okay", modelText: "Tell me more." },
+        {
+          turnIndex: 2,
+          userText: "I think the patient needs more rest and fluids today",
+          modelText: "Thank you.",
+        },
+      ],
+      evaluation: null,
+    } as any);
+
+    render(<Harness {...baseProps} />);
+    await waitFor(() =>
+      expect(screen.getByText(/attempt #1/i)).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByText(/attempt #1/i));
+
+    await waitFor(() =>
+      expect(screen.getByText("Verbal Engagement")).toBeInTheDocument()
+    );
+    expect(screen.getByText("Moderate responses")).toBeInTheDocument();
+    expect(screen.getByText(/Avg words \/ response/)).toBeInTheDocument();
+    expect(screen.getByText("4.0")).toBeInTheDocument();
+  });
+
+  it("shows 'Not enough data' for verbal engagement when there are no student responses", async () => {
+    vi.mocked(sessionApi.listByAssignment).mockResolvedValue({
+      sessions: [
+        {
+          sessionId: "s-1",
+          attemptNo: 1,
+          mode: "assessment",
+          status: "completed",
+          startedAt: "2026-02-01T10:00:00Z",
+          endedAt: "2026-02-01T10:10:00Z",
+        },
+      ],
+    } as any);
+    vi.mocked(sessionApi.get).mockResolvedValue({
+      session: {
+        sessionId: "s-1",
+        attemptNo: 1,
+        mode: "assessment",
+        status: "completed",
+        startedAt: "2026-02-01T10:00:00Z",
+        endedAt: "2026-02-01T10:10:00Z",
+      },
+      // Only patient (modelText) speech → zero student responses.
+      turns: [{ turnIndex: 0, userText: "", modelText: "Hello?" }],
+      evaluation: null,
+    } as any);
+
+    render(<Harness {...baseProps} />);
+    await waitFor(() =>
+      expect(screen.getByText(/attempt #1/i)).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByText(/attempt #1/i));
+
+    await waitFor(() =>
+      expect(screen.getByText("Not enough data")).toBeInTheDocument()
+    );
+  });
 });
