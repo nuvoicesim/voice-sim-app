@@ -62,6 +62,7 @@ import { surveyInstanceFunction } from "./functions/survey-instance-function/res
 import { eventLogFunction } from "./functions/event-log-function/resource";
 import { migrationFunction } from "./functions/migration-function/resource";
 import { moduleAssetFunction } from "./functions/module-asset-function/resource";
+import { exportFunction } from "./functions/export-function/resource";
 import { auth } from "./auth/resource";
 import { data } from "./data/resource";
 import { type IGrantable, PolicyStatement } from "aws-cdk-lib/aws-iam";
@@ -93,6 +94,7 @@ const backend = defineBackend({
   eventLogFunction,
   migrationFunction,
   moduleAssetFunction,
+  exportFunction,
 });
 
 const storageStack = backend.createStack("unity-storage-stack");
@@ -652,6 +654,30 @@ backend.ttsFunction.addEnvironment(
   process.env.ELEVENLABS_API_KEY ?? ""
 );
 
+// export-function (faculty Review Package) — READ-ONLY across the target
+// student's sessions/turns/evidence + the course's structure. Course-scoped
+// authorization via shared/course-auth (requireCourseInstructor + enrollment).
+grantCourseAuthReadTables(backend.exportFunction);
+attachCourseAuthEnv(backend.exportFunction);
+sessionTable.grantReadData(backend.exportFunction.resources.lambda);
+turnTable.grantReadData(backend.exportFunction.resources.lambda);
+sessionEvidenceTable.grantReadData(backend.exportFunction.resources.lambda);
+moduleTable.grantReadData(backend.exportFunction.resources.lambda);
+moduleItemTable.grantReadData(backend.exportFunction.resources.lambda);
+assignmentTable.grantReadData(backend.exportFunction.resources.lambda);
+backend.exportFunction.addEnvironment("TURN_TABLE_NAME", turnTable.tableName);
+backend.exportFunction.addEnvironment(
+  "SESSION_EVIDENCE_TABLE_NAME",
+  sessionEvidenceTable.tableName
+);
+backend.exportFunction.addEnvironment("USER_POOL_ID", userPoolId);
+backend.exportFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["cognito-idp:AdminGetUser"],
+    resources: [userPool.userPoolArn],
+  })
+);
+
 // create a new API stack
 const apiStack = backend.createStack("api-stack");
 
@@ -1104,6 +1130,60 @@ moduleAssetRestApi.addGatewayResponse("Default5XX", {
   },
 });
 
+// ─── ExportAPI ────────────────────────────────────────────────────────────
+// Faculty "review package" export lives on its OWN RestApi/stack for the same
+// reason as ModuleAssetAPI: the main NurseTownAPI stack is at the 500-resource
+// CFN limit. The frontend resolves "ExportAPI" via amplify_outputs.json.
+const exportApiStack = backend.createStack("export-api-stack");
+
+const exportRestApi = new RestApi(exportApiStack, "ExportRestApi", {
+  restApiName: "ExportAPI",
+  deploy: true,
+  deployOptions: {
+    stageName: process.env.AMPLIFY_ENV || "dev",
+  },
+  defaultCorsPreflightOptions: {
+    allowOrigins: Cors.ALL_ORIGINS,
+    allowMethods: Cors.ALL_METHODS,
+    allowHeaders: [...Cors.DEFAULT_HEADERS, "X-Request-ID"],
+  },
+});
+
+const exportAuthorizer = new CognitoUserPoolsAuthorizer(exportApiStack, "ExportAuthorizer", {
+  cognitoUserPools: [backend.auth.resources.userPool],
+});
+const exportCognitoMethodOptions = {
+  authorizationType: AuthorizationType.COGNITO,
+  authorizer: exportAuthorizer,
+};
+
+const exportLambdaIntegration = new LambdaIntegration(
+  backend.exportFunction.resources.lambda
+);
+
+// GET /courses/{courseId}/students/{studentUserId}/review-package
+const exportCoursesPath = exportRestApi.root.addResource("courses");
+const exportCourseItemPath = exportCoursesPath.addResource("{courseId}");
+const exportCourseStudentsPath = exportCourseItemPath.addResource("students");
+const exportCourseStudentItemPath = exportCourseStudentsPath.addResource("{studentUserId}");
+const exportReviewPackagePath = exportCourseStudentItemPath.addResource("review-package");
+exportReviewPackagePath.addMethod("GET", exportLambdaIntegration, exportCognitoMethodOptions);
+
+exportRestApi.addGatewayResponse("ExportDefault4XX", {
+  type: ResponseType.DEFAULT_4XX,
+  responseHeaders: {
+    "Access-Control-Allow-Origin": "'*'",
+    "Access-Control-Allow-Headers": "'*'",
+  },
+});
+exportRestApi.addGatewayResponse("ExportDefault5XX", {
+  type: ResponseType.DEFAULT_5XX,
+  responseHeaders: {
+    "Access-Control-Allow-Origin": "'*'",
+    "Access-Control-Allow-Headers": "'*'",
+  },
+});
+
 // add outputs to the configuration file
 backend.addOutput({
   custom: {
@@ -1117,6 +1197,11 @@ backend.addOutput({
         endpoint: moduleAssetRestApi.url,
         region: Stack.of(moduleAssetRestApi).region,
         apiName: moduleAssetRestApi.restApiName,
+      },
+      [exportRestApi.restApiName]: {
+        endpoint: exportRestApi.url,
+        region: Stack.of(exportRestApi).region,
+        apiName: exportRestApi.restApiName,
       },
     },
     UnityStorage: {

@@ -5,13 +5,15 @@ import {
   Box,
   Title,
   Anchor,
+  Button,
   Group,
   Text,
   Accordion,
   Loader,
   Stack,
 } from "@mantine/core";
-import { IconArrowLeft } from "@tabler/icons-react";
+import { IconArrowLeft, IconDownload } from "@tabler/icons-react";
+import { reviewPackageApi } from "../../../api/reviewPackageApi";
 import type { AppDispatch } from "../../../store";
 import {
   fetchCourse,
@@ -58,6 +60,8 @@ export default function StudentCourseDetailPage() {
   const [resolvedEmail, setResolvedEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!courseId) return;
@@ -167,6 +171,38 @@ export default function StudentCourseDetailPage() {
     };
   }, [studentUserId, enrollment?.studentEmail, resolvedEmail]);
 
+  // Export the current student's grading-oriented Review Package as an HTML
+  // file. Required behavior: download the .html; also opens a preview tab.
+  const handleExportReviewPackage = async () => {
+    if (!courseId || !studentUserId) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { filename, html } = await reviewPackageApi.getForStudent(
+        courseId,
+        studentUserId
+      );
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || "VOICE-Review-Package.html";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Optional preview tab; revoke after a delay so both the download and the
+      // preview can read the blob URL.
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e: unknown) {
+      setExportError(
+        e instanceof Error ? e.message : "Failed to export review package"
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (!courseId || !studentUserId) {
     return <Navigate to="/faculty/courses" replace />;
   }
@@ -197,9 +233,28 @@ export default function StudentCourseDetailPage() {
           <Text size="sm">Back to course</Text>
         </Group>
       </Anchor>
-      <Title order={2} mb="md">
-        {enrollment.studentEmail || resolvedEmail || studentUserId} — {course.title}
-      </Title>
+      <Group justify="space-between" align="flex-start" mb="md" wrap="nowrap">
+        <Title order={2}>
+          {enrollment.studentEmail || resolvedEmail || studentUserId} — {course.title}
+        </Title>
+        <Stack gap={4} align="flex-end">
+          <Button
+            leftSection={<IconDownload size={16} />}
+            variant="light"
+            color="terracotta"
+            radius="md"
+            onClick={handleExportReviewPackage}
+            loading={exporting}
+          >
+            Export Review Package
+          </Button>
+          {exportError && (
+            <Text size="xs" c="red" ta="right" maw={280}>
+              {exportError}
+            </Text>
+          )}
+        </Stack>
+      </Group>
 
       <Stack gap="md">
         {loading ? (
