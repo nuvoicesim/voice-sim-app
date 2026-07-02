@@ -55,6 +55,7 @@ import { cognitoUserApi } from "../../api/cognitoUserApi";
 import type { StudentItemProgress } from "../../slices/studentProgressSlice";
 import type { AppDispatch } from "../../store";
 import { PageHeader, SectionCard, StatCard } from "../../components/design";
+import { SurveyResultsSection } from "./courses/components/SurveyResultsSection";
 
 /**
  * Faculty Analysis — course-specific dashboard (V1, frontend-only).
@@ -918,6 +919,20 @@ export default function AnalysisCourseDashboardPage() {
         onOpenStudent={(uid) =>
           navigate(`/faculty/courses/${courseId}/students/${uid}`)
         }
+      />
+
+      {/* ── Survey Results (additive; collapsed by default, fetches only
+          when a faculty user expands it — initial page load unchanged) ── */}
+      <SurveyResultsSection
+        courseId={courseId}
+        students={matrix.map((r) => ({
+          studentUserId: r.studentUserId,
+          studentEmail: r.studentEmail,
+          consented: r.consentDecision?.decision === "agreed",
+          groupKey: r.groupKey,
+        }))}
+        sortedModules={sortedModules}
+        itemsByModule={itemsByModule}
       />
 
       <Text size="xs" c="var(--claude-stone)" ta="center" mt="md">

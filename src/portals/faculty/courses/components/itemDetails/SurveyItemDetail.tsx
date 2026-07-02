@@ -4,6 +4,11 @@ import {
   surveyInstanceApi,
   type SurveyInstanceRow,
 } from "../../../../../api/surveyInstanceApi";
+import {
+  formatAnswer,
+  likertScaleHint,
+  type SurveyQuestionDef,
+} from "../../../../../utils/surveyAnswerFormat";
 
 interface Props {
   itemId: string;
@@ -21,11 +26,12 @@ export function SurveyItemDetail({ itemId, studentUserId }: Props) {
     setError(null);
     surveyInstanceApi
       .getForStudent(itemId, studentUserId)
-      .then((res: any) => {
+      .then((res) => {
         if (!cancelled) setInstance(res?.instance ?? null);
       })
-      .catch((e: any) => {
-        if (!cancelled) setError(e?.message || "Failed to load survey");
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : "Failed to load survey");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -44,8 +50,11 @@ export function SurveyItemDetail({ itemId, studentUserId }: Props) {
       </Text>
     );
 
-  const questions: Array<{ id: string; prompt: string }> =
-    instance.schemaSnapshot?.questions || [];
+  // Full question definitions (including choice option value→label pairs)
+  // are available in the instance's frozen schemaSnapshot — use them so
+  // answers render as the labels students actually saw, not internal
+  // values like "opt1".
+  const questions: SurveyQuestionDef[] = instance.schemaSnapshot?.questions || [];
   const answers = instance.answers || {};
 
   return (
@@ -69,24 +78,25 @@ export function SurveyItemDetail({ itemId, studentUserId }: Props) {
           No questions in snapshot.
         </Text>
       ) : (
-        questions.map((q) => (
-          <Card key={q.id} withBorder p="xs">
-            <Text size="sm" fw={500}>
-              {q.prompt}
-            </Text>
-            <Text size="sm" mt={2}>
-              {formatAnswer(answers[q.id])}
-            </Text>
-          </Card>
-        ))
+        questions.map((q) => {
+          const scaleHint = likertScaleHint(q);
+          return (
+            <Card key={q.id} withBorder p="xs">
+              <Text size="sm" fw={500}>
+                {q.prompt}
+              </Text>
+              <Text size="sm" mt={2}>
+                {formatAnswer(q, answers[q.id], answers, "(no answer)")}
+              </Text>
+              {scaleHint && (
+                <Text size="xs" c="dimmed" mt={2}>
+                  {scaleHint}
+                </Text>
+              )}
+            </Card>
+          );
+        })
       )}
     </Stack>
   );
-}
-
-function formatAnswer(value: unknown): string {
-  if (value == null || value === "") return "(no answer)";
-  if (Array.isArray(value)) return value.map(String).join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }
