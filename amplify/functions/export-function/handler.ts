@@ -15,6 +15,7 @@ import {
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
 import { buildReviewPackage, type BuildInput, type TurnLike } from "./review-package";
 import { renderReviewPackageHtml } from "./render-html";
+import { buildCueEventsCsv } from "./cue-events-csv";
 
 const SESSION_TABLE = process.env.SESSION_TABLE_NAME;
 const TURN_TABLE = process.env.TURN_TABLE_NAME;
@@ -95,6 +96,52 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const moduleIdFilter = params.moduleId?.trim() || null;
     const studentEmail =
       (typeof enrollment.studentEmail === "string" && enrollment.studentEmail) || studentUserId;
+
+    // ── Internal cue-event CSV export (?format=cue-events-csv) ──
+    // Same route, same auth chain as the HTML review package; any other format
+    // value falls through to the unchanged HTML path. Whole-course scope
+    // (moduleId is not honored here). Covers ALL session statuses so
+    // incomplete-session evidence is included.
+    if ((params.format ?? "").trim().toLowerCase() === "cue-events-csv") {
+      const [allSessions, allEvidence, allAssignments] = await Promise.all([
+        scanByAttribute(SESSION_TABLE, "studentUserId", studentUserId),
+        scanByAttribute(SESSION_EVIDENCE_TABLE, "studentUserId", studentUserId),
+        scanByAttribute(ASSIGNMENT_TABLE, "courseId", courseId),
+      ]);
+      const courseAssignmentIds = new Set<string>();
+      for (const a of allAssignments) {
+        if (typeof a.assignmentId === "string" && a.assignmentId) {
+          courseAssignmentIds.add(a.assignmentId);
+        }
+      }
+      // Never represent the Cognito sub as an email. CourseEnrollment
+      // .studentEmail is the only email source this Lambda can read: resolving
+      // sub → email needs cognito-idp:ListUsers (see cognito-user-function's
+      // handleBatchResolve), a permission this function does not have. A
+      // missing email becomes an explicit non-email marker instead.
+      const csvStudentEmail =
+        typeof enrollment.studentEmail === "string" && enrollment.studentEmail.trim() !== ""
+          ? enrollment.studentEmail.trim()
+          : "email_unavailable";
+      const csv = buildCueEventsCsv({
+        studentEmail: csvStudentEmail,
+        studentUserId,
+        courseId,
+        courseAssignmentIds,
+        sessions: allSessions,
+        evidenceRows: allEvidence,
+      });
+      const datePart = new Date().toISOString().slice(0, 10);
+      // Filename policy: opaque studentUserId only — never the email.
+      const filename = `VOICE-Cue-Events-${sanitizeForFilename(studentUserId)}-${datePart}.csv`;
+      console.log("cue-events export generated", {
+        courseId,
+        studentUserId,
+        sessions: allSessions.length,
+        evidenceRows: allEvidence.length,
+      });
+      return createResponse(HTTP_STATUS.OK, { filename, csv });
+    }
 
     // ── Gather (ONE student) ──
     // Scan-risk / scope: these Scans are intentionally bounded to a SINGLE
