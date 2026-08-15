@@ -12,8 +12,9 @@ import {
   Loader,
   Stack,
 } from "@mantine/core";
-import { IconArrowLeft, IconDownload } from "@tabler/icons-react";
+import { IconArrowLeft, IconDownload, IconFileSpreadsheet } from "@tabler/icons-react";
 import { reviewPackageApi } from "../../../api/reviewPackageApi";
+import { notify } from "../../../utils/notify";
 import type { AppDispatch } from "../../../store";
 import {
   fetchCourse,
@@ -62,6 +63,8 @@ export default function StudentCourseDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportingCueCsv, setExportingCueCsv] = useState(false);
+  const [cueCsvError, setCueCsvError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!courseId) return;
@@ -203,6 +206,37 @@ export default function StudentCourseDetailPage() {
     }
   };
 
+  // Internal research export: raw cue-click events for THIS student as a CSV
+  // download. Independent of the Review Package export's state.
+  const handleExportCueEventsCsv = async () => {
+    if (!courseId || !studentUserId) return;
+    setExportingCueCsv(true);
+    setCueCsvError(null);
+    try {
+      const { filename, csv } = await reviewPackageApi.getCueEventsCsvForStudent(
+        courseId,
+        studentUserId
+      );
+      // UTF-8 BOM so Excel opens the file correctly (same as the survey CSV).
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || "VOICE-Cue-Events.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify.success("Cue events CSV downloaded");
+    } catch (e: unknown) {
+      setCueCsvError(
+        e instanceof Error ? e.message : "Failed to export cue events CSV"
+      );
+    } finally {
+      setExportingCueCsv(false);
+    }
+  };
+
   if (!courseId || !studentUserId) {
     return <Navigate to="/faculty/courses" replace />;
   }
@@ -251,6 +285,21 @@ export default function StudentCourseDetailPage() {
           {exportError && (
             <Text size="xs" c="red" ta="right" maw={280}>
               {exportError}
+            </Text>
+          )}
+          <Button
+            leftSection={<IconFileSpreadsheet size={16} />}
+            variant="light"
+            color="terracotta"
+            radius="md"
+            onClick={handleExportCueEventsCsv}
+            loading={exportingCueCsv}
+          >
+            Export Cue Events CSV
+          </Button>
+          {cueCsvError && (
+            <Text size="xs" c="red" ta="right" maw={280}>
+              {cueCsvError}
             </Text>
           )}
         </Stack>

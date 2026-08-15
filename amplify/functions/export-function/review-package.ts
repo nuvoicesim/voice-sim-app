@@ -254,7 +254,7 @@ function buildMetrics(session: any, turns: TurnLike[]): AttemptMetrics {
 
 // ───────────── Cue parsing (from SessionEvidence) ─────────────
 
-function normCueLevel(v: unknown): "Semantic" | "Phonemic" | "Model" | null {
+export function normCueLevel(v: unknown): "Semantic" | "Phonemic" | "Model" | null {
   const s = String(v ?? "").trim().toLowerCase();
   if (s.startsWith("sem")) return "Semantic";
   if (s.startsWith("phon")) return "Phonemic";
@@ -262,7 +262,7 @@ function normCueLevel(v: unknown): "Semantic" | "Phonemic" | "Model" | null {
   return null;
 }
 
-function asObject(value: unknown): any | null {
+export function asObject(value: unknown): any | null {
   if (!value) return null;
   if (typeof value === "object") return value;
   if (typeof value === "string") {

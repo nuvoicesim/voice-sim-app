@@ -11,6 +11,11 @@ export interface ReviewPackageResponse {
   html: string;
 }
 
+export interface CueEventsCsvResponse {
+  filename: string;
+  csv: string;
+}
+
 export const reviewPackageApi = {
   /**
    * Faculty-only, course-scoped HTML review package for ONE student.
@@ -24,6 +29,17 @@ export const reviewPackageApi = {
     apiGet<ReviewPackageResponse>(
       `/courses/${courseId}/students/${studentUserId}/review-package`,
       { format: "html", ...(opts?.moduleId ? { moduleId: opts.moduleId } : {}) },
+      EXPORT_API_NAME
+    ),
+
+  /**
+   * Faculty-only internal raw cue-event CSV for ONE student (whole course).
+   * Same ExportAPI route as the review package, selected via format.
+   */
+  getCueEventsCsvForStudent: (courseId: string, studentUserId: string) =>
+    apiGet<CueEventsCsvResponse>(
+      `/courses/${courseId}/students/${studentUserId}/review-package`,
+      { format: "cue-events-csv" },
       EXPORT_API_NAME
     ),
 };
