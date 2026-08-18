@@ -27,6 +27,7 @@ import {
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
 import { chooseGroupBalanced, validateRandomizerPayload } from "./balanced";
+import { projectStudentFeedback } from "./student-feedback";
 
 const COURSE_TABLE = process.env.COURSE_TABLE_NAME!;
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
@@ -800,6 +801,16 @@ async function handleListFeedback(
   }
   const accessError = await requireCourseEnrollment(caller, item.courseId, dynamo);
   if (accessError) return accessError;
+
+  // Phase 3's internal displayLabel is the true AI/Faculty 1/Faculty 2 label,
+  // so the legacy feedback projection is not safe even if `source` is removed.
+  // Phase 3 cards are available only via survey-instance-function's whitelist.
+  const phase3Projection = projectStudentFeedback(item, []);
+  if (!phase3Projection.allowed) {
+    return createResponse(HTTP_STATUS.FORBIDDEN, {
+      error: "Phase 3 feedback is available only through the survey activity",
+    });
+  }
   const result = await dynamo.send(
     new ScanCommand({
       TableName: REVIEWER_FEEDBACK_TABLE,
@@ -807,16 +818,16 @@ async function handleListFeedback(
       ExpressionAttributeValues: { ":i": itemId, ":s": caller.userId },
     })
   );
-  const masked = (result.Items || []).map((row) =>
-    row.revealed
-      ? row
-      : {
-          ...row,
-          reviewerUserId: undefined,
-          source: undefined,
-        }
-  );
-  return createResponse(HTTP_STATUS.OK, { feedback: masked });
+  // Second guard: the pre-scan check above can only inspect the queried item.
+  // Re-project with the actual rows so Phase 3 cards filed under a scope item
+  // that carries no payload marker are still refused rather than returned.
+  const projected = projectStudentFeedback(item, result.Items || []);
+  if (!projected.allowed) {
+    return createResponse(HTTP_STATUS.FORBIDDEN, {
+      error: "Phase 3 feedback is available only through the survey activity",
+    });
+  }
+  return createResponse(HTTP_STATUS.OK, { feedback: projected.feedback });
 }
 
 async function handleSubmitFeedback(caller: any, itemId: string, body: string | null) {

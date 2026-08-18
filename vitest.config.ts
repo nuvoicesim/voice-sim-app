@@ -11,6 +11,7 @@ export default defineConfig({
     include: [
       "src/**/*.{test,spec}.{ts,tsx}",
       "amplify/functions/**/*.test.ts",
+      "scripts/**/*.test.ts",
       "__tests__/**/*.test.ts",
     ],
     exclude: ["node_modules", "amplify/node_modules", "dist", ".amplify"],

@@ -22,13 +22,22 @@ interface SurveyRunnerProps {
   onChange: (id: string, value: any) => void;
   disabled?: boolean;
   onSubmit?: () => void;
+  /** Display-only group headings keyed by zero-based question index. */
+  sectionHeaders?: Record<number, string>;
 }
 
 function wordCount(text: string): number {
   return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
-export function SurveyRunner({ questions, answers, onChange, disabled, onSubmit }: SurveyRunnerProps) {
+export function SurveyRunner({
+  questions,
+  answers,
+  onChange,
+  disabled,
+  onSubmit,
+  sectionHeaders,
+}: SurveyRunnerProps) {
   const allAnswered = questions.every((q) => {
     if (!q.required) return true;
     const ans = answers[q.id];
@@ -66,8 +75,15 @@ export function SurveyRunner({ questions, answers, onChange, disabled, onSubmit 
           q.config.otherLabel
             ? q.config.otherLabel
             : "Other (specify)";
+        const sectionHeader = sectionHeaders?.[idx];
         return (
-        <Card key={q.id} withBorder>
+          <Box key={`section-${q.id}`}>
+            {sectionHeader && (
+              <Text fw={700} size="sm" mt={idx === 0 ? 0 : "md"} mb="xs">
+                {sectionHeader}
+              </Text>
+            )}
+          <Card withBorder>
           <Group gap={8} mb="xs">
             <Badge size="sm" color="gray">
               Q{idx + 1}
@@ -181,7 +197,8 @@ export function SurveyRunner({ questions, answers, onChange, disabled, onSubmit 
               ) : null}
             </Box>
           )}
-        </Card>
+          </Card>
+          </Box>
         );
       })}
 
