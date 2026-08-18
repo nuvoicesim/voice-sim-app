@@ -1,5 +1,33 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
 
+/**
+ * Cognito group used to close direct client access to EVERY model in this
+ * schema. No such group is defined by this app in amplify/auth/resource.ts, so
+ * ordinary app-issued tokens do not carry it. Operators must reserve it for
+ * explicitly approved research administrators. It is written as a named group
+ * rather than an empty rule list so the intent is explicit, and so access can
+ * later be granted deliberately rather than by accident.
+ *
+ * WHY EVERY MODEL. Nothing in this repository calls the AppSync/GraphQL API:
+ * the frontend uses aws-amplify/api (REST) only, no Lambda uses the Data
+ * client or allow.resource(), and every table is reached through the REST
+ * Lambdas with IAM grants wired in amplify/backend.ts. `allow.authenticated()`
+ * therefore granted every signed-in student full CRUD over an entirely unused
+ * surface — including course/module configuration, survey templates, gating,
+ * per-student progress, consent records, and other students' answers. Closing
+ * it removes that surface without changing any code path in use.
+ *
+ * IMPORTANT: this only closes the AppSync/GraphQL surface. Lambdas are
+ * unaffected — they reach these tables through direct DynamoDB SDK calls with
+ * IAM grants wired in amplify/backend.ts, never through the Data client.
+ *
+ * NOTE: this does not by itself prevent role escalation. `custom:role` is
+ * declared mutable in amplify/auth/resource.ts and the REST layer derives
+ * caller authority from that claim; whether the deployed Cognito app client
+ * lets a user write it is a separate launch-time verification item.
+ */
+const RESEARCH_ADMIN_GROUP = "research-admin";
+
 const schema = a.schema({
   // ─── Legacy tables (kept for backward compatibility) ───
 
@@ -11,7 +39,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["userID"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   PostSurveyAnswers: a
     .model({
@@ -21,7 +49,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["userID"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   SimulationData: a
     .model({
@@ -32,7 +60,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["userID", "simulationLevel"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   DebriefAnswers: a
     .model({
@@ -43,7 +71,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["userID", "simulationLevel"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   // ─── New assignment-centric tables ───
 
@@ -74,7 +102,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["sceneId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   Assignment: a
     .model({
@@ -98,7 +126,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["assignmentId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   PatientProfile: a
     .model({
@@ -113,7 +141,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["patientProfileId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   UnityBuild: a
     .model({
@@ -132,7 +160,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["unityBuildId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   AssignmentEnrollment: a
     .model({
@@ -145,7 +173,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["assignmentId", "studentUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   SimulationSession: a
     .model({
@@ -160,7 +188,7 @@ const schema = a.schema({
       createdAt: a.string().required(),
     })
     .identifier(["sessionId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   SessionTurn: a
     .model({
@@ -194,7 +222,7 @@ const schema = a.schema({
       cueMetadata: a.json(),
     })
     .identifier(["sessionId", "turnIndex"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   SessionEvaluation: a
     .model({
@@ -207,7 +235,7 @@ const schema = a.schema({
       createdAt: a.string().required(),
     })
     .identifier(["sessionId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   SessionTaskProgress: a
     .model({
@@ -230,7 +258,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index("sessionId").sortKeys(["progressKey"]).name("bySessionProgressKey"),
     ])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   SurveyTemplate: a
     .model({
@@ -246,7 +274,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["surveyTemplateId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   AssignmentSurveyResponse: a
     .model({
@@ -260,7 +288,7 @@ const schema = a.schema({
       completionStatus: a.enum(["pending", "completed", "skipped"]),
     })
     .identifier(["assignmentId", "responseKey"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   // ─── Canvas-like LMS additions ───
 
@@ -280,7 +308,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["courseId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   CourseInstructor: a
     .model({
@@ -293,7 +321,7 @@ const schema = a.schema({
       addedBy: a.string().required(),
     })
     .identifier(["courseId", "facultyUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   CourseEnrollment: a
     .model({
@@ -305,7 +333,7 @@ const schema = a.schema({
       status: a.enum(["active", "removed"]),
     })
     .identifier(["courseId", "studentUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   Module: a
     .model({
@@ -320,7 +348,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["moduleId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   ModuleItem: a
     .model({
@@ -350,8 +378,15 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["moduleItemId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
+  // Client-side GraphQL access is intentionally closed (see ReviewerFeedback
+  // note below for the full rationale). `allow.authenticated()` would let any
+  // signed-in student read/modify EVERY other student's survey answers through
+  // the AppSync endpoint. All legitimate access goes through
+  // survey-instance-function over REST, which scopes every read and write to
+  // the calling student. No frontend or Lambda code uses the Data/GraphQL
+  // client for this model.
   SurveyInstance: a
     .model({
       moduleItemId: a.string().required(),
@@ -369,7 +404,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["moduleItemId", "studentUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   StudentItemProgress: a
     .model({
@@ -393,7 +428,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["moduleItemId", "studentUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   StudentGroupAssignment: a
     .model({
@@ -406,7 +441,7 @@ const schema = a.schema({
       assignedAt: a.string().required(),
     })
     .identifier(["courseId", "studentUserId", "scopeKey"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   ReviewerAssignment: a
     .model({
@@ -417,31 +452,67 @@ const schema = a.schema({
       createdAt: a.string().required(),
     })
     .identifier(["moduleItemId", "reviewerUserId", "studentUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
+  // BLINDING-CRITICAL MODEL.
+  //
+  // This table holds the true AI-vs-faculty source of every Phase 3 feedback
+  // card. Under the previous `allow.authenticated()` rule any signed-in student
+  // could call the AppSync endpoint directly (its URL ships in the browser
+  // bundle via amplify_outputs.json) and run `listReviewerFeedbacks` to read
+  // every participant's source mapping before the reveal — or mutate `revealed`
+  // / `body` / delete rows outright. That defeats the Phase 3 blind design no
+  // matter what the Lambda layer strips, so client access is closed entirely.
+  //
+  // Owner-based auth is deliberately NOT used: it would still let a student read
+  // `source` on their own three rows, which is precisely the value being hidden
+  // until the reveal gate fires.
+  //
+  // Legitimate reads reach students only through survey-instance-function, which
+  // projects a blind-safe view (see phase3-cards.ts). Seeding is done by
+  // scripts/seed-phase3.mjs using direct DynamoDB access with AWS credentials.
   ReviewerFeedback: a
     .model({
       feedbackId: a.string().required(),
       moduleItemId: a.string().required(),
       studentUserId: a.string().required(),
       source: a.enum(["ai", "reviewer"]),
-      // null when source = "ai".
+      // null when source = "ai", and also null for Phase 3 rows: the two Phase 3
+      // faculty reviewers score outside VOICE and have no VOICE account.
       reviewerUserId: a.string(),
-      // "Source 1/2/3" used in blinded mode.
+      // "Source 1/2/3" in the legacy blinded mode. For Phase 3 this carries the
+      // internal true label ("AI" / "Faculty 1" / "Faculty 2") and is NEVER
+      // projected to students — not even after the reveal, which discloses only
+      // "AI-generated" vs "Faculty-generated".
       displayLabel: a.string(),
       body: a.string().required(),
-      // 1-7 (rounded from AI 8-24 totalScore for AI rows).
+      // 1-7 (rounded from AI 8-24 totalScore for AI rows). Unused by Phase 3.
       score: a.integer(),
       basedOnSessionId: a.string(),
       // false until reveal_trigger fires; ai_detection keeps locked but unrevealed.
       revealed: a.boolean().required(),
       // Frozen by ai_detection submission so reviewer cannot edit afterward.
       locked: a.boolean().required(),
+
+      // ── Phase 3 additions (all optional; legacy rows stay valid, no migration) ──
+      // Frozen D1-D3 rubric scores as strings so "N/A" is representable
+      // alongside "1".."4": {"d1":"3","d2":"N/A","d3":"4"}. VOICE never computes
+      // these — they arrive already scored and QA'd from outside the system.
+      dimensionScores: a.json(),
+      // Frozen display position "A" | "B" | "C". The A/B/C-to-source
+      // counterbalancing is assigned by the research team before launch with a
+      // documented seed; VOICE never re-randomizes at runtime.
+      displayKey: a.string(),
+      // sha256 over the canonical NUL-delimited D1/D2/D3/narrative form, written at seed time
+      // so the artifact shown to a student can be verified against the frozen
+      // external source (scripts/seed-phase3.mjs --verify).
+      contentHash: a.string(),
+
       createdAt: a.string().required(),
       updatedAt: a.string().required(),
     })
     .identifier(["feedbackId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   EventLog: a
     .model({
@@ -457,7 +528,7 @@ const schema = a.schema({
       createdAt: a.string().required(),
     })
     .identifier(["eventId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   MigrationLog: a
     .model({
@@ -467,7 +538,7 @@ const schema = a.schema({
       meta: a.json(),
     })
     .identifier(["migrationName"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   // Permanent IRB-style record of a student's consent decision for a consent
   // ModuleItem. One row per (consent item, student); upsert on change-of-mind.
@@ -485,7 +556,7 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(["consentItemId", "studentUserId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 
   // VOICE user-study raw evidence rows, written by llm-scoring-function for
   // both Phase 1 rubric submissions and Phase 2 training submissions. The full
@@ -514,7 +585,7 @@ const schema = a.schema({
       createdAt: a.string().required(),
     })
     .identifier(["evidenceId"])
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [allow.group(RESEARCH_ADMIN_GROUP)]),
 });
 
 export type Schema = ClientSchema<typeof schema>;

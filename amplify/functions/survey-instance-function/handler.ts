@@ -18,6 +18,14 @@ import {
   requireCourseInstructor,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import {
+  assessPhase3Eligibility,
+  buildPhase3Cards,
+  isFullyRevealed,
+  selectRowsForStudent,
+  type Phase3Card,
+  type ReviewerFeedbackRow,
+} from "./phase3-cards";
 
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
 const SURVEY_INSTANCE_TABLE = process.env.SURVEY_INSTANCE_TABLE_NAME!;
@@ -59,6 +67,115 @@ async function consentGate(
     };
   }
   return { ok: true };
+}
+
+function phase3CardScopeId(item: any): string | null {
+  const id = item?.payload?.feedbackCardsFromItemId;
+  return typeof id === "string" && id.trim() !== "" ? id.trim() : null;
+}
+
+async function loadPhase3Rows(
+  scopeItemId: string,
+  studentUserId: string
+): Promise<ReviewerFeedbackRow[]> {
+  const items: ReviewerFeedbackRow[] = [];
+  let lastKey: Record<string, unknown> | undefined;
+  do {
+    const result = await dynamo.send(
+      new ScanCommand({
+        TableName: REVIEWER_FEEDBACK_TABLE,
+        FilterExpression: "moduleItemId = :i AND studentUserId = :s",
+        ExpressionAttributeValues: { ":i": scopeItemId, ":s": studentUserId },
+        ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+      })
+    );
+    items.push(...((result.Items || []) as ReviewerFeedbackRow[]));
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+  return selectRowsForStudent(items, studentUserId);
+}
+
+function phase3RequiresReveal(item: any): boolean {
+  if (!phase3CardScopeId(item)) return false;
+  if (typeof item?.payload?.requireFeedbackReveal === "boolean") {
+    return item.payload.requireFeedbackReveal;
+  }
+  return !item?.payload?.revealOnSubmit?.unblindAssignmentItemId;
+}
+
+async function phase3Gate(item: any, studentUserId: string) {
+  const scopeItemId = phase3CardScopeId(item);
+  if (!scopeItemId) return null;
+
+  const rows = await loadPhase3Rows(scopeItemId, studentUserId);
+  const eligibility = assessPhase3Eligibility(rows);
+  if (!eligibility.eligible) {
+    return createResponse(HTTP_STATUS.FORBIDDEN, {
+      error: "Phase 3 feedback is not available for this account",
+      phase3Eligible: false,
+      reason: eligibility.reason,
+    });
+  }
+  if (phase3RequiresReveal(item) && !isFullyRevealed(rows)) {
+    return createResponse(HTTP_STATUS.CONFLICT, {
+      error: "Phase 3 source reveal is not complete",
+      phase3Eligible: true,
+      reason: "reveal_pending",
+    });
+  }
+  return null;
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function missingRequiredAnswers(questions: any[], answers: Record<string, any>): string[] {
+  const missing: string[] = [];
+  for (const q of questions || []) {
+    if (!q?.required || typeof q.id !== "string") continue;
+    const value = answers?.[q.id];
+    let valid = true;
+    if (q.type === "likert") {
+      const scale = Number(q.config?.scale);
+      valid =
+        Number.isInteger(value) &&
+        value >= 1 &&
+        Number.isFinite(scale) &&
+        value <= scale;
+    } else if (q.type === "choice_single") {
+      const allowed = new Set((q.config?.options || []).map((o: any) => o?.value));
+      const isOther = value === "__other__" && q.config?.allowOther === true;
+      valid = typeof value === "string" && (allowed.has(value) || isOther);
+      if (valid && isOther) {
+        valid =
+          typeof answers[`${q.id}__other_text`] === "string" &&
+          answers[`${q.id}__other_text`].trim().length > 0;
+      }
+    } else if (q.type === "choice_multi") {
+      const allowed = new Set((q.config?.options || []).map((o: any) => o?.value));
+      valid =
+        Array.isArray(value) &&
+        value.length > 0 &&
+        value.every(
+          (v: unknown) =>
+            allowed.has(v) || (v === "__other__" && q.config?.allowOther === true)
+        );
+      if (valid && value.includes("__other__")) {
+        valid =
+          typeof answers[`${q.id}__other_text`] === "string" &&
+          answers[`${q.id}__other_text`].trim().length > 0;
+      }
+    } else if (q.type === "free_text") {
+      const minWords = Number(q.config?.minWords ?? 0);
+      valid =
+        typeof value === "string" &&
+        value.trim().length > 0 &&
+        wordCount(value) >= minWords;
+    }
+    if (!valid) missing.push(q.id);
+  }
+  return missing;
 }
 
 const dynamo = createDynamoDbClient();
@@ -136,6 +253,10 @@ async function handleGet(caller: any, itemId: string) {
     });
   }
 
+  // Run before snapshot creation so an ineligible account cannot create data.
+  const p3Denied = await phase3Gate(item, caller.userId);
+  if (p3Denied) return p3Denied;
+
   let instance = await getItem(
     SURVEY_INSTANCE_TABLE,
     { moduleItemId: itemId, studentUserId: caller.userId },
@@ -191,6 +312,15 @@ async function handleGet(caller: any, itemId: string) {
     await putItem(PROGRESS_TABLE, progressNow, dynamo);
   }
 
+  const scopeItemId = phase3CardScopeId(item);
+  if (scopeItemId) {
+    const rows = await loadPhase3Rows(scopeItemId, caller.userId);
+    const cards: Phase3Card[] | null = buildPhase3Cards(rows, caller.userId);
+    return createResponse(HTTP_STATUS.OK, {
+      instance: { ...instance, phase3Cards: cards ?? [] },
+    });
+  }
+
   return createResponse(HTTP_STATUS.OK, { instance });
 }
 
@@ -209,6 +339,9 @@ async function handleSaveAnswers(caller: any, itemId: string, body: string | nul
       consentModuleItemId: gate.consentModuleItemId,
     });
   }
+
+  const p3Denied = await phase3Gate(item, caller.userId);
+  if (p3Denied) return p3Denied;
 
   const payload = parseJsonBody(body);
   const incomingAnswers = payload.answers && typeof payload.answers === "object" ? payload.answers : {};
@@ -250,6 +383,9 @@ async function handleSubmit(caller: any, itemId: string) {
     });
   }
 
+  const p3Denied = await phase3Gate(item, caller.userId);
+  if (p3Denied) return p3Denied;
+
   const existing = await getItem(
     SURVEY_INSTANCE_TABLE,
     { moduleItemId: itemId, studentUserId: caller.userId },
@@ -257,22 +393,79 @@ async function handleSubmit(caller: any, itemId: string) {
   );
   if (!existing) return notFoundResponse("Instance not started");
   if (existing.status === "submitted") {
+    if (
+      phase3CardScopeId(item) &&
+      item.payload?.revealOnSubmit?.unblindAssignmentItemId
+    ) {
+      const revealComplete = await tryRevealFeedback(
+        item,
+        item.payload.revealOnSubmit.unblindAssignmentItemId,
+        caller.userId
+      );
+      if (revealComplete) await markSurveyProgressCompleted(item, caller.userId);
+      return createResponse(HTTP_STATUS.OK, {
+        instance: existing,
+        alreadySubmitted: true,
+        revealComplete,
+      });
+    }
     return createResponse(HTTP_STATUS.OK, { instance: existing, alreadySubmitted: true });
+  }
+
+  if (phase3CardScopeId(item)) {
+    const missing = missingRequiredAnswers(
+      existing.schemaSnapshot?.questions || [],
+      existing.answers || {}
+    );
+    if (missing.length > 0) {
+      return createResponse(HTTP_STATUS.BAD_REQUEST, {
+        error: "All Phase 3 survey questions are required",
+        missingQuestionIds: missing,
+      });
+    }
   }
 
   const now = generateTimestamp();
   const updated = { ...existing, status: "submitted", submittedAt: now, updatedAt: now };
   await putItem(SURVEY_INSTANCE_TABLE, updated, dynamo);
 
-  // Mark item progress completed.
+  const revealConfig = item.payload?.revealOnSubmit;
+  let revealComplete = true;
+  if (revealConfig?.unblindAssignmentItemId) {
+    revealComplete = await tryRevealFeedback(
+      item,
+      revealConfig.unblindAssignmentItemId,
+      caller.userId
+    );
+  }
+
+  // Withhold P3-AC completion while reveal is incomplete. Part D also has an
+  // independent server-side reveal gate, so direct REST calls cannot bypass it.
+  if (!phase3CardScopeId(item) || revealComplete) {
+    await markSurveyProgressCompleted(item, caller.userId);
+  }
+
+  await emitEvent(caller.userId, item.courseId, item.moduleId, itemId, "survey_submitted", {
+    surveyTemplateId: existing.surveyTemplateId,
+    ...(phase3CardScopeId(item) ? { revealComplete } : {}),
+  });
+
+  return createResponse(HTTP_STATUS.OK, {
+    instance: updated,
+    ...(phase3CardScopeId(item) ? { revealComplete } : {}),
+  });
+}
+
+async function markSurveyProgressCompleted(item: any, studentUserId: string) {
+  const now = generateTimestamp();
   const progress = await getItem(
     PROGRESS_TABLE,
-    { moduleItemId: itemId, studentUserId: caller.userId },
+    { moduleItemId: item.moduleItemId, studentUserId },
     dynamo
   );
   const progressNow = {
-    moduleItemId: itemId,
-    studentUserId: caller.userId,
+    moduleItemId: item.moduleItemId,
+    studentUserId,
     courseId: item.courseId,
     moduleId: item.moduleId,
     ...(progress || {}),
@@ -283,38 +476,38 @@ async function handleSubmit(caller: any, itemId: string) {
     updatedAt: now,
   };
   await putItem(PROGRESS_TABLE, progressNow, dynamo);
-
-  await emitEvent(caller.userId, item.courseId, item.moduleId, itemId, "survey_submitted", {
-    surveyTemplateId: existing.surveyTemplateId,
-  });
-
-  // Handle reveal trigger if configured on this item.
-  const revealConfig = item.payload?.revealOnSubmit;
-  if (revealConfig?.unblindAssignmentItemId) {
-    await unblindFeedbackForStudent(
-      revealConfig.unblindAssignmentItemId,
-      caller.userId
-    );
-  }
-
-  return createResponse(HTTP_STATUS.OK, { instance: updated });
 }
 
-async function unblindFeedbackForStudent(assignmentItemId: string, studentUserId: string) {
-  const result = await dynamo.send(
-    new ScanCommand({
-      TableName: REVIEWER_FEEDBACK_TABLE,
-      FilterExpression: "moduleItemId = :i AND studentUserId = :s",
-      ExpressionAttributeValues: { ":i": assignmentItemId, ":s": studentUserId },
-    })
-  );
-  for (const row of result.Items || []) {
-    if (row.revealed) continue;
-    await putItem(
-      REVIEWER_FEEDBACK_TABLE,
-      { ...row, revealed: true, updatedAt: generateTimestamp() },
-      dynamo
-    );
+async function tryRevealFeedback(item: any, assignmentItemId: string, studentUserId: string) {
+  try {
+    const rows = await loadPhase3Rows(assignmentItemId, studentUserId);
+    // The Phase 3 card-set precondition applies only to Phase 3 items. The
+    // legacy Phase 1/2 reveal (a survey item carrying revealOnSubmit without
+    // feedbackCardsFromItemId) targets rows that have no displayKey /
+    // dimensionScores / contentHash, so demanding a valid A/B/C set there would
+    // make every legacy reveal silently no-op.
+    if (phase3CardScopeId(item)) {
+      const eligibility = assessPhase3Eligibility(rows);
+      if (!eligibility.eligible) {
+        throw new Error(`reveal target is not a valid Phase 3 card set: ${eligibility.reason}`);
+      }
+    }
+    for (const row of rows) {
+      if (row.revealed) continue;
+      await putItem(
+        REVIEWER_FEEDBACK_TABLE,
+        { ...row, revealed: true, updatedAt: generateTimestamp() },
+        dynamo
+      );
+    }
+    return true;
+  } catch (revealError) {
+    console.error("phase3 reveal failed after committed submit", {
+      moduleItemId: item.moduleItemId,
+      studentUserId,
+      message: revealError instanceof Error ? revealError.message : "unknown error",
+    });
+    return false;
   }
 }
 
