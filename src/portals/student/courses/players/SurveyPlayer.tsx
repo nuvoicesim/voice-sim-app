@@ -170,6 +170,7 @@ export function SurveyPlayer({ item }: { item: any }) {
           disabled={submitted}
           onSubmit={submitted ? undefined : handleSubmit}
           sectionHeaders={sectionHeaders}
+          hideQuestionNumbers={item?.payload?.hideQuestionNumbers === true}
         />
       </Stack>
     </Card>

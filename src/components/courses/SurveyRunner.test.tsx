@@ -7,7 +7,8 @@ import type { SurveyQuestion } from "../../slices/surveyTemplateSlice";
 function renderRunner(
   questions: SurveyQuestion[],
   answers: Record<string, unknown>,
-  sectionHeaders?: Record<number, string>
+  sectionHeaders?: Record<number, string>,
+  hideQuestionNumbers?: boolean
 ) {
   return render(
     <MantineProvider>
@@ -17,6 +18,7 @@ function renderRunner(
         onChange={vi.fn()}
         onSubmit={vi.fn()}
         sectionHeaders={sectionHeaders}
+        hideQuestionNumbers={hideQuestionNumbers}
       />
     </MantineProvider>
   );
@@ -47,6 +49,43 @@ describe("SurveyRunner Phase 3 display-only sections", () => {
     expect(screen.getByText("Frozen wording 1")).toBeInTheDocument();
     expect(screen.getByText("Frozen wording 7")).toBeInTheDocument();
     expect(screen.getByText("Frozen wording 13")).toBeInTheDocument();
+  });
+});
+
+describe("SurveyRunner question numbering", () => {
+  const questions: SurveyQuestion[] = Array.from({ length: 3 }, (_, i) => ({
+    id: `q${i + 1}`,
+    type: "likert" as const,
+    prompt: `Prompt ${i + 1}`,
+    required: true,
+    config: { scale: 7, leftAnchor: "Low", rightAnchor: "High" },
+  }));
+
+  it("shows Q{n} badges by default (existing surveys keep their numbering)", () => {
+    renderRunner(questions, {});
+    expect(screen.getByText("Q1")).toBeInTheDocument();
+    expect(screen.getByText("Q2")).toBeInTheDocument();
+    expect(screen.getByText("Q3")).toBeInTheDocument();
+  });
+
+  it("hides every question number when hideQuestionNumbers is set (Phase 3)", () => {
+    renderRunner(
+      questions,
+      {},
+      { 0: "The following questions are about Feedback Card A" },
+      true
+    );
+    // No numbering anywhere — students see only headings, prompts, options.
+    expect(screen.queryByText(/^Q\d+$/)).toBeNull();
+    // Prompts, section headings, and the Required badge still render.
+    expect(screen.getByText("Prompt 1")).toBeInTheDocument();
+    expect(screen.getByText(/Feedback Card A$/)).toBeInTheDocument();
+    expect(screen.getAllByText("Required").length).toBe(3);
+  });
+
+  it("keeps numbering visible when hideQuestionNumbers is false", () => {
+    renderRunner(questions, {}, undefined, false);
+    expect(screen.getByText("Q1")).toBeInTheDocument();
   });
 });
 

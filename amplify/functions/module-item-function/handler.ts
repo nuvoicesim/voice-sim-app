@@ -28,6 +28,11 @@ import {
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
 import { chooseGroupBalanced, validateRandomizerPayload } from "./balanced";
 import { projectStudentFeedback } from "./student-feedback";
+import {
+  executePhase3Setup,
+  type ModuleItemRow,
+  type Phase3SetupDeps,
+} from "./phase3-setup";
 
 const COURSE_TABLE = process.env.COURSE_TABLE_NAME!;
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
@@ -44,6 +49,7 @@ const ASSIGNMENT_TABLE = process.env.ASSIGNMENT_TABLE_NAME!;
 const EVENT_LOG_TABLE = process.env.EVENT_LOG_TABLE_NAME!;
 const ENROLLMENT_TABLE = process.env.COURSE_ENROLLMENT_TABLE_NAME!;
 const CONSENT_DECISION_TABLE = process.env.CONSENT_DECISION_TABLE_NAME!;
+const SURVEY_TEMPLATE_TABLE = process.env.SURVEY_TEMPLATE_TABLE_NAME || "";
 
 // Internal counters maintained by the balanced randomizer strategy on the
 // ModuleItem row itself. Underscore prefix marks them as not API-visible.
@@ -78,9 +84,22 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     if (authError) return authError;
 
     // GET/POST /modules/{moduleId}/items
+    // POST also carries the idempotent Phase 3 survey-flow setup via
+    // ?operation=phase3-setup — reusing this route keeps api-stack under
+    // CloudFormation's 500-resource limit (no extra Resource/Method/Permission).
     if (pathParams.moduleId && resource.endsWith("/modules/{moduleId}/items")) {
       if (method === "GET") return await handleListItems(caller!, pathParams.moduleId);
-      if (method === "POST") return await handleCreateItem(caller!, pathParams.moduleId, event.body);
+      if (method === "POST") {
+        const operation = queryParams.operation || "";
+        if (operation === "phase3-setup") {
+          return await handlePhase3Setup(caller!, pathParams.moduleId, event.body);
+        }
+        if (operation) {
+          // Never let a typo fall through into plain item creation.
+          return badRequestResponse(`Unknown operation "${operation}"`);
+        }
+        return await handleCreateItem(caller!, pathParams.moduleId, event.body);
+      }
     }
 
     // ── ModuleItem item-level routes ──
@@ -251,6 +270,77 @@ async function handleCreateItem(caller: any, moduleId: string, body: string | nu
   }
 
   return createResponse(HTTP_STATUS.CREATED, item);
+}
+
+/**
+ * POST /modules/{moduleId}/items?operation=phase3-setup
+ *
+ * Server-side, idempotent Phase 3 survey-flow setup (see phase3-setup.ts for
+ * the concurrency rules). Instructor-only, like item create/update. Shares
+ * the /items route so it costs no extra API Gateway resources.
+ */
+async function handlePhase3Setup(caller: any, moduleId: string, body: string | null) {
+  const resolved = await resolveModuleCourseId(dynamo, moduleId);
+  if (!resolved) return notFoundResponse("Module not found");
+  const authError = await requireCourseInstructor(caller, resolved.courseId, dynamo);
+  if (authError) return authError;
+  if (!SURVEY_TEMPLATE_TABLE) {
+    return serverErrorResponse("SURVEY_TEMPLATE_TABLE_NAME not configured");
+  }
+
+  const payload = parseJsonBody(body);
+  const deps: Phase3SetupDeps = {
+    listModuleItems: async (mid: string) => {
+      const rows: ModuleItemRow[] = [];
+      let lastKey: Record<string, unknown> | undefined;
+      do {
+        const result = await dynamo.send(
+          new ScanCommand({
+            TableName: MODULE_ITEM_TABLE,
+            FilterExpression: "moduleId = :m",
+            ExpressionAttributeValues: { ":m": mid },
+            ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+          })
+        );
+        rows.push(...((result.Items || []) as ModuleItemRow[]));
+        lastKey = result.LastEvaluatedKey;
+      } while (lastKey);
+      return rows;
+    },
+    getTemplate: (surveyTemplateId: string) =>
+      getItem(SURVEY_TEMPLATE_TABLE, { surveyTemplateId }, dynamo),
+    createItemIfAbsent: async (item: ModuleItemRow) => {
+      try {
+        await dynamo.send(
+          new PutCommand({
+            TableName: MODULE_ITEM_TABLE,
+            Item: item,
+            ConditionExpression: "attribute_not_exists(moduleItemId)",
+          })
+        );
+        return true;
+      } catch (e) {
+        if (e instanceof Error && e.name === "ConditionalCheckFailedException") {
+          return false;
+        }
+        throw e;
+      }
+    },
+    getModuleItem: (moduleItemId: string) =>
+      getItem(MODULE_ITEM_TABLE, { moduleItemId }, dynamo),
+    putModuleItem: async (item: ModuleItemRow) => {
+      await putItem(MODULE_ITEM_TABLE, item, dynamo);
+    },
+    now: generateTimestamp,
+  };
+
+  const outcome = await executePhase3Setup(deps, {
+    moduleId,
+    courseId: resolved.courseId,
+    partsACTemplateId: payload.partsACTemplateId,
+    partDTemplateId: payload.partDTemplateId,
+  });
+  return createResponse(outcome.status, outcome.body);
 }
 
 function defaultCompletionRule(itemType: string) {

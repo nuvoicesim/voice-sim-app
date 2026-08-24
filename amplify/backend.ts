@@ -345,6 +345,12 @@ backend.moduleItemFunction.addEnvironment(
   "CONSENT_DECISION_TABLE_NAME",
   consentDecisionTable.tableName
 );
+// Phase 3 setup endpoint validates survey templates (25/9 questions) server-side.
+surveyTemplateTable.grantReadData(backend.moduleItemFunction.resources.lambda);
+backend.moduleItemFunction.addEnvironment(
+  "SURVEY_TEMPLATE_TABLE_NAME",
+  surveyTemplateTable.tableName
+);
 
 // survey-instance-function — RW SurveyInstance, R/W ReviewerFeedback (reveal flips), R SurveyTemplate
 surveyInstanceTable.grantReadWriteData(backend.surveyInstanceFunction.resources.lambda);
@@ -981,6 +987,10 @@ const moduleReorderPath = moduleItemPath2.addResource("reorder");
 moduleReorderPath.addMethod("POST", moduleLambdaIntegration, cognitoMethodOptions);
 
 // /modules/{moduleId}/items
+// POST doubles as the idempotent Phase 3 survey-flow setup when called with
+// ?operation=phase3-setup — a dedicated route would add an API Gateway
+// Resource + Method + Lambda Permission and push api-stack past
+// CloudFormation's 500-resource limit.
 const moduleItemsPath = moduleItemPath2.addResource("items");
 moduleItemsPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
 moduleItemsPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);

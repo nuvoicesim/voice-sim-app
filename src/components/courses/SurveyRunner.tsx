@@ -24,6 +24,9 @@ interface SurveyRunnerProps {
   onSubmit?: () => void;
   /** Display-only group headings keyed by zero-based question index. */
   sectionHeaders?: Record<number, string>;
+  /** Suppress the "Q{n}" position badges. Used by Phase 3 research surveys,
+   *  where students must see only prompts/options — never any numbering. */
+  hideQuestionNumbers?: boolean;
 }
 
 function wordCount(text: string): number {
@@ -37,6 +40,7 @@ export function SurveyRunner({
   disabled,
   onSubmit,
   sectionHeaders,
+  hideQuestionNumbers,
 }: SurveyRunnerProps) {
   const allAnswered = questions.every((q) => {
     if (!q.required) return true;
@@ -84,16 +88,20 @@ export function SurveyRunner({
               </Text>
             )}
           <Card withBorder>
-          <Group gap={8} mb="xs">
-            <Badge size="sm" color="gray">
-              Q{idx + 1}
-            </Badge>
-            {q.required && (
-              <Badge size="sm" color="terracotta" variant="light">
-                Required
-              </Badge>
-            )}
-          </Group>
+          {(!hideQuestionNumbers || q.required) && (
+            <Group gap={8} mb="xs">
+              {!hideQuestionNumbers && (
+                <Badge size="sm" color="gray">
+                  Q{idx + 1}
+                </Badge>
+              )}
+              {q.required && (
+                <Badge size="sm" color="terracotta" variant="light">
+                  Required
+                </Badge>
+              )}
+            </Group>
+          )}
           <Text fw={500} mb="sm" style={{ whiteSpace: "pre-wrap" }}>
             {q.prompt || "(no prompt)"}
           </Text>
