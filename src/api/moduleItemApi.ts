@@ -6,10 +6,12 @@ export const moduleItemApi = {
     apiPost(`/modules/${moduleId}/items`, data),
   get: (itemId: string) => apiGet(`/module-items/${itemId}`),
   // Idempotent server-side Phase 3 survey-flow setup (Parts A–C + Part D).
+  // Shares the /items route (?operation=...) to avoid adding an API Gateway
+  // resource — api-stack sits at CloudFormation's 500-resource limit.
   phase3Setup: (
     moduleId: string,
     body: { partsACTemplateId?: string; partDTemplateId?: string }
-  ) => apiPost(`/modules/${moduleId}/phase3-setup`, body),
+  ) => apiPost(`/modules/${moduleId}/items?operation=phase3-setup`, body),
   update: (itemId: string, data: any) => apiPut(`/module-items/${itemId}`, data),
   delete: (itemId: string) => apiDelete(`/module-items/${itemId}`),
 

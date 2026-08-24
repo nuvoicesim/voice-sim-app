@@ -84,18 +84,22 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     if (authError) return authError;
 
     // GET/POST /modules/{moduleId}/items
+    // POST also carries the idempotent Phase 3 survey-flow setup via
+    // ?operation=phase3-setup — reusing this route keeps api-stack under
+    // CloudFormation's 500-resource limit (no extra Resource/Method/Permission).
     if (pathParams.moduleId && resource.endsWith("/modules/{moduleId}/items")) {
       if (method === "GET") return await handleListItems(caller!, pathParams.moduleId);
-      if (method === "POST") return await handleCreateItem(caller!, pathParams.moduleId, event.body);
-    }
-
-    // POST /modules/{moduleId}/phase3-setup — idempotent Phase 3 survey-flow setup
-    if (
-      method === "POST" &&
-      pathParams.moduleId &&
-      resource.endsWith("/modules/{moduleId}/phase3-setup")
-    ) {
-      return await handlePhase3Setup(caller!, pathParams.moduleId, event.body);
+      if (method === "POST") {
+        const operation = queryParams.operation || "";
+        if (operation === "phase3-setup") {
+          return await handlePhase3Setup(caller!, pathParams.moduleId, event.body);
+        }
+        if (operation) {
+          // Never let a typo fall through into plain item creation.
+          return badRequestResponse(`Unknown operation "${operation}"`);
+        }
+        return await handleCreateItem(caller!, pathParams.moduleId, event.body);
+      }
     }
 
     // ── ModuleItem item-level routes ──
@@ -269,10 +273,11 @@ async function handleCreateItem(caller: any, moduleId: string, body: string | nu
 }
 
 /**
- * POST /modules/{moduleId}/phase3-setup
+ * POST /modules/{moduleId}/items?operation=phase3-setup
  *
  * Server-side, idempotent Phase 3 survey-flow setup (see phase3-setup.ts for
- * the concurrency rules). Instructor-only, like item create/update.
+ * the concurrency rules). Instructor-only, like item create/update. Shares
+ * the /items route so it costs no extra API Gateway resources.
  */
 async function handlePhase3Setup(caller: any, moduleId: string, body: string | null) {
   const resolved = await resolveModuleCourseId(dynamo, moduleId);

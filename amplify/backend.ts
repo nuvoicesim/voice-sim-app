@@ -987,13 +987,13 @@ const moduleReorderPath = moduleItemPath2.addResource("reorder");
 moduleReorderPath.addMethod("POST", moduleLambdaIntegration, cognitoMethodOptions);
 
 // /modules/{moduleId}/items
+// POST doubles as the idempotent Phase 3 survey-flow setup when called with
+// ?operation=phase3-setup — a dedicated route would add an API Gateway
+// Resource + Method + Lambda Permission and push api-stack past
+// CloudFormation's 500-resource limit.
 const moduleItemsPath = moduleItemPath2.addResource("items");
 moduleItemsPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
 moduleItemsPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
-
-// /modules/{moduleId}/phase3-setup — idempotent Phase 3 survey-flow setup
-const modulePhase3SetupPath = moduleItemPath2.addResource("phase3-setup");
-modulePhase3SetupPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
 
 // /module-items/{itemId}
 const moduleItemsRoot = myRestApi.root.addResource("module-items");
