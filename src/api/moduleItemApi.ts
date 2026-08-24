@@ -5,6 +5,11 @@ export const moduleItemApi = {
   create: (moduleId: string, data: any) =>
     apiPost(`/modules/${moduleId}/items`, data),
   get: (itemId: string) => apiGet(`/module-items/${itemId}`),
+  // Idempotent server-side Phase 3 survey-flow setup (Parts A–C + Part D).
+  phase3Setup: (
+    moduleId: string,
+    body: { partsACTemplateId?: string; partDTemplateId?: string }
+  ) => apiPost(`/modules/${moduleId}/phase3-setup`, body),
   update: (itemId: string, data: any) => apiPut(`/module-items/${itemId}`, data),
   delete: (itemId: string) => apiDelete(`/module-items/${itemId}`),
 

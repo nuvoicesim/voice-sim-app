@@ -345,6 +345,12 @@ backend.moduleItemFunction.addEnvironment(
   "CONSENT_DECISION_TABLE_NAME",
   consentDecisionTable.tableName
 );
+// Phase 3 setup endpoint validates survey templates (25/9 questions) server-side.
+surveyTemplateTable.grantReadData(backend.moduleItemFunction.resources.lambda);
+backend.moduleItemFunction.addEnvironment(
+  "SURVEY_TEMPLATE_TABLE_NAME",
+  surveyTemplateTable.tableName
+);
 
 // survey-instance-function — RW SurveyInstance, R/W ReviewerFeedback (reveal flips), R SurveyTemplate
 surveyInstanceTable.grantReadWriteData(backend.surveyInstanceFunction.resources.lambda);
@@ -984,6 +990,10 @@ moduleReorderPath.addMethod("POST", moduleLambdaIntegration, cognitoMethodOption
 const moduleItemsPath = moduleItemPath2.addResource("items");
 moduleItemsPath.addMethod("GET", moduleItemLambdaIntegration, cognitoMethodOptions);
 moduleItemsPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
+
+// /modules/{moduleId}/phase3-setup — idempotent Phase 3 survey-flow setup
+const modulePhase3SetupPath = moduleItemPath2.addResource("phase3-setup");
+modulePhase3SetupPath.addMethod("POST", moduleItemLambdaIntegration, cognitoMethodOptions);
 
 // /module-items/{itemId}
 const moduleItemsRoot = myRestApi.root.addResource("module-items");

@@ -51,6 +51,7 @@ import type { ModuleItemType } from "../../../slices/moduleItemSlice";
 import { notify } from "../../../utils/notify";
 import { SortableList } from "../../../components/courses/SortableList";
 import { MarkdownTextarea } from "../../../components/courses/MarkdownTextarea";
+import { Phase3SurveyFlowSetup } from "./components/Phase3SurveyFlowSetup";
 
 const TYPE_ICONS: Record<string, any> = {
   assignment: IconRocket,
@@ -355,6 +356,9 @@ export default function ModuleEditorPage() {
           )}
         </Card>
       </SimpleGrid>
+
+      {/* ── Phase 3 survey flow setup (Parts A–C + Part D) ── */}
+      {moduleId && <Phase3SurveyFlowSetup moduleId={moduleId} />}
 
       <Stack gap="sm">
         {items.length === 0 ? (
