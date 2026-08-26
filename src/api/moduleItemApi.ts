@@ -12,6 +12,45 @@ export const moduleItemApi = {
     moduleId: string,
     body: { partsACTemplateId?: string; partDTemplateId?: string }
   ) => apiPost(`/modules/${moduleId}/items?operation=phase3-setup`, body),
+
+  // ── Phase 3 feedback data import ──
+  // All four operations share the SAME /modules/{moduleId}/items route via
+  // ?operation=... for the same reason as phase3-setup: a dedicated route would
+  // add an API Gateway Resource + Method + Lambda Permission to api-stack, which
+  // is at CloudFormation's 500-resource limit.
+  //
+  // The browser only ever sends raw CSV text and confirmation strings. The
+  // Parts A–C / Part D item ids, the provenance constants and every gate are
+  // derived server-side and re-checked on commit.
+  phase3Status: (moduleId: string) =>
+    apiPost(`/modules/${moduleId}/items?operation=phase3-status`, {}),
+  phase3ImportPreview: (
+    moduleId: string,
+    body: { mode: "tester" | "formal"; csv: string }
+  ) =>
+    apiPost(`/modules/${moduleId}/items?operation=phase3-import-preview`, body),
+  phase3ImportCommit: (
+    moduleId: string,
+    body: {
+      mode: "tester" | "formal";
+      csv: string;
+      expectedPlanHash: string;
+      confirmTesterEmail?: string;
+      confirmProvenance?: { assignmentVersion: string; randomSeed: string };
+      confirmFormalPhrase?: string;
+    }
+  ) =>
+    apiPost(`/modules/${moduleId}/items?operation=phase3-import-commit`, body),
+  phase3PurgeTester: (
+    moduleId: string,
+    body: {
+      scope: "one" | "all";
+      studentUserId?: string;
+      commit: boolean;
+      confirmText?: string;
+    }
+  ) => apiPost(`/modules/${moduleId}/items?operation=phase3-purge-tester`, body),
+
   update: (itemId: string, data: any) => apiPut(`/module-items/${itemId}`, data),
   delete: (itemId: string) => apiDelete(`/module-items/${itemId}`),
 

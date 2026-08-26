@@ -38,6 +38,7 @@ import {
   validatePhase3TemplateSelection,
 } from "../phase3-survey-flow";
 import type { TemplateResolution } from "../phase3-survey-flow";
+import { Phase3FeedbackDataImport } from "./Phase3FeedbackDataImport";
 
 /**
  * "Set up Phase 3 Survey Flow" panel for the module editor.
@@ -224,11 +225,18 @@ export function Phase3SurveyFlowSetup({ moduleId }: { moduleId: string }) {
               {templateName(flow.partD)}, unlocked after Parts A–C + reveal
             </Text>
           </Group>
+          {/* Feedback data import is offered ONLY from inside the Configured
+              branch, so "the flow is wired" is a structural precondition of the
+              panel existing — the server re-derives and re-checks it anyway. */}
+          <Phase3FeedbackDataImport moduleId={moduleId} />
           <Alert color="parchment" variant="light" icon={<IconInfoCircle size={16} />}>
             <Text size="sm">
-              To seed feedback cards, run <Code>scripts/seed-phase3.mjs</Code>{" "}
-              with <Code>--item-id {flow.partsAC!.moduleItemId}</Code> and{" "}
-              <Code>--part-d-item-id {flow.partD!.moduleItemId}</Code>.
+              Command-line fallback: <Code>scripts/seed-phase3.mjs</Code> with{" "}
+              <Code>--item-id {flow.partsAC!.moduleItemId}</Code> and{" "}
+              <Code>--part-d-item-id {flow.partD!.moduleItemId}</Code>. A CLI
+              tester import additionally requires{" "}
+              <Code>EVENT_LOG_TABLE_NAME</Code> so it can write the permanent
+              tester-history marker.
             </Text>
           </Alert>
         </Stack>

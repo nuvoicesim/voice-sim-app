@@ -142,27 +142,68 @@ export async function deleteItem(
 }
 
 /**
- * Execute a transaction write operation with multiple items
- * @param tableName - Name of the DynamoDB table
+ * Error thrown when a TransactWriteItems call is cancelled by DynamoDB.
+ *
+ * `cancellationReasons` is the ONLY signal that says which item's condition
+ * failed, so it is preserved rather than collapsed into a generic message —
+ * callers that rely on conditional writes need it to tell the operator exactly
+ * what conflicted.
+ */
+export class TransactionWriteError extends Error {
+  readonly cancellationReasons?: unknown;
+  readonly originalError?: unknown;
+
+  constructor(
+    message: string,
+    options?: { cancellationReasons?: unknown; originalError?: unknown }
+  ) {
+    super(message);
+    this.name = "TransactionWriteError";
+    this.cancellationReasons = options?.cancellationReasons;
+    this.originalError = options?.originalError;
+  }
+}
+
+/**
+ * Execute an all-or-nothing transaction write.
+ *
+ * Each transact item carries its own TableName (a transaction may span tables),
+ * so no table name argument is needed.
+ *
  * @param transactItems - Array of transaction items to write
  * @param dynamo - DynamoDB client instance
+ * @param options.clientRequestToken - Idempotency token (<=36 chars). Guards the
+ *   "request succeeded but the response was lost" retry within a 10-minute window.
  */
 export async function transactWriteItems(
-  tableName: string,
   transactItems: any[],
-  dynamo: DynamoDBDocumentClient
+  dynamo: DynamoDBDocumentClient,
+  options?: { clientRequestToken?: string }
 ): Promise<void> {
-  if (!tableName) {
-    throw new Error("Table name is required");
+  if (!Array.isArray(transactItems) || transactItems.length === 0) {
+    throw new Error("transactItems must be a non-empty array");
   }
-  
+
   try {
     await dynamo.send(new TransactWriteCommand({
-      TransactItems: transactItems
+      TransactItems: transactItems,
+      ...(options?.clientRequestToken
+        ? { ClientRequestToken: options.clientRequestToken }
+        : {}),
     }));
   } catch (error) {
-    console.error("Error executing transaction write:", error);
-    throw new Error("Failed to execute transaction write");
+    const reasons = (error as { CancellationReasons?: unknown })?.CancellationReasons;
+    console.error("Error executing transaction write:", {
+      name: (error as Error)?.name,
+      message: (error as Error)?.message,
+      cancellationReasons: reasons,
+    });
+    throw new TransactionWriteError(
+      (error as Error)?.name === "TransactionCanceledException"
+        ? "The transaction was cancelled; nothing was written."
+        : "Failed to execute transaction write",
+      { cancellationReasons: reasons, originalError: error }
+    );
   }
 }
 

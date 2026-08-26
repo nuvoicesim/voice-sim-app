@@ -1,5 +1,11 @@
 import type { APIGatewayProxyHandler } from "aws-lambda";
-import { ScanCommand, GetCommand, UpdateCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  ScanCommand,
+  GetCommand,
+  UpdateCommand,
+  PutCommand,
+  BatchGetCommand,
+} from "@aws-sdk/lib-dynamodb";
 import { createHash } from "crypto";
 import {
   createResponse,
@@ -18,6 +24,7 @@ import {
   deleteItem,
   generateId,
   generateTimestamp,
+  transactWriteItems,
   requireCourseInstructor,
   requireCourseAccess,
   requireCourseEnrollment,
@@ -26,6 +33,7 @@ import {
   listCourseInstructors,
 } from "../shared";
 import { extractCallerIdentity, requireRole } from "../shared/auth-middleware";
+import type { CallerIdentity } from "../shared/auth-middleware";
 import { chooseGroupBalanced, validateRandomizerPayload } from "./balanced";
 import { projectStudentFeedback } from "./student-feedback";
 import {
@@ -33,6 +41,15 @@ import {
   type ModuleItemRow,
   type Phase3SetupDeps,
 } from "./phase3-setup";
+import {
+  executePhase3Import,
+  executePhase3PurgeTester,
+  executePhase3Status,
+  type EnrollmentRow,
+  type FeedbackRow,
+  type Phase3ImportDeps,
+  type Phase3ImportMode,
+} from "./phase3-import";
 
 const COURSE_TABLE = process.env.COURSE_TABLE_NAME!;
 const MODULE_ITEM_TABLE = process.env.MODULE_ITEM_TABLE_NAME!;
@@ -93,6 +110,18 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         const operation = queryParams.operation || "";
         if (operation === "phase3-setup") {
           return await handlePhase3Setup(caller!, pathParams.moduleId, event.body);
+        }
+        if (operation === "phase3-status") {
+          return await handlePhase3Status(caller!, pathParams.moduleId);
+        }
+        if (operation === "phase3-import-preview") {
+          return await handlePhase3Import(caller!, pathParams.moduleId, event.body, false);
+        }
+        if (operation === "phase3-import-commit") {
+          return await handlePhase3Import(caller!, pathParams.moduleId, event.body, true);
+        }
+        if (operation === "phase3-purge-tester") {
+          return await handlePhase3PurgeTesterRoute(caller!, pathParams.moduleId, event.body);
         }
         if (operation) {
           // Never let a typo fall through into plain item creation.
@@ -339,6 +368,264 @@ async function handlePhase3Setup(caller: any, moduleId: string, body: string | n
     courseId: resolved.courseId,
     partsACTemplateId: payload.partsACTemplateId,
     partDTemplateId: payload.partDTemplateId,
+  });
+  return createResponse(outcome.status, outcome.body);
+}
+
+// ───────────── Phase 3 feedback data import ─────────────
+
+/** Upload ceiling. 51 rows of 100-200 word narratives are ~100 KB. */
+const PHASE3_MAX_CSV_BYTES = 1_000_000;
+/** BatchGetItem accepts at most 100 keys per request. */
+const BATCH_GET_CHUNK = 100;
+/** UnprocessedKeys retry budget. Exhausting it is a hard failure, never a pass. */
+const BATCH_GET_MAX_ATTEMPTS = 5;
+
+/**
+ * Paginated Scan.
+ *
+ * `consistentRead` defaults to FALSE so existing callers keep DynamoDB's default
+ * eventually-consistent behaviour; only the Phase 3 safety path opts in.
+ */
+async function scanAllPages(
+  tableName: string,
+  filterExpression: string,
+  values: Record<string, unknown>,
+  options?: { consistentRead?: boolean }
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  let lastKey: Record<string, unknown> | undefined;
+  do {
+    const result = await dynamo.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: filterExpression,
+        ExpressionAttributeValues: values,
+        ...(options?.consistentRead ? { ConsistentRead: true } : {}),
+        ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+      })
+    );
+    out.push(...((result.Items || []) as Record<string, unknown>[]));
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+  return out;
+}
+
+/**
+ * Storage adapter for the Phase 3 import.
+ *
+ * ── Why every read here is strongly consistent ───────────────────────────────
+ * The tester/formal mutual exclusion is an optimistic-concurrency argument, and
+ * it only holds if the two reads it rests on cannot disagree with committed
+ * state:
+ *
+ *   1. Read the flow generation off the Parts A–C ModuleItem — CONSISTENT.
+ *   2. Read the feedback/tester state under that item — CONSISTENT.
+ *   3. Any tester import or purge, whether it landed before those reads or
+ *      races them, MUST also move the generation: every one of them carries a
+ *      conditional Update on that single ModuleItem row.
+ *   4. So the commit transaction's `#gen = :observed` condition fails for
+ *      anything the reads could have missed.
+ *   5. Therefore the dangerous window — "saw the newest generation, but an
+ *      eventually-consistent scan had not yet surfaced an already-committed
+ *      tester row or its history marker" — cannot occur.
+ *
+ * Step 5 is exactly what a default eventually-consistent read would reopen: a
+ * replica could serve the current generation while still omitting a committed
+ * tester row, and the guard would then be satisfied by a scan that was blind to
+ * the very thing it exists to detect. That is why the flag is not optional on
+ * any read that feeds a safety decision.
+ */
+function buildPhase3ImportDeps(): Phase3ImportDeps {
+  const CONSISTENT = { consistentRead: true } as const;
+  return {
+    listModuleItems: async (mid: string) =>
+      (await scanAllPages(
+        MODULE_ITEM_TABLE,
+        "moduleId = :m",
+        { ":m": mid },
+        CONSISTENT
+      )) as unknown as ModuleItemRow[],
+    scanFeedbackByItem: async (partsACItemId: string) =>
+      (await scanAllPages(
+        REVIEWER_FEEDBACK_TABLE,
+        "moduleItemId = :i",
+        { ":i": partsACItemId },
+        CONSISTENT
+      )) as unknown as FeedbackRow[],
+    scanEnrollments: async (courseId: string) =>
+      (await scanAllPages(
+        ENROLLMENT_TABLE,
+        "courseId = :c",
+        { ":c": courseId },
+        CONSISTENT
+      )) as unknown as EnrollmentRow[],
+    /**
+     * Exact-key lookup of the deterministic tester-history markers. This is a
+     * BatchGet, never a Scan: EventLog has no GSI and is the highest-volume
+     * table in the system, so a filtered scan would eventually time out and
+     * block the formal import forever.
+     *
+     * UnprocessedKeys means "unknown", not "absent". A fail-closed gate may
+     * never read it as a pass, so the budget being exhausted throws.
+     */
+    batchGetEventIds: async (eventIds: string[]) => {
+      const found = new Set<string>();
+      for (let i = 0; i < eventIds.length; i += BATCH_GET_CHUNK) {
+        let pending = eventIds
+          .slice(i, i + BATCH_GET_CHUNK)
+          .map((eventId) => ({ eventId }));
+        let attempts = 0;
+        while (pending.length > 0) {
+          if (attempts >= BATCH_GET_MAX_ATTEMPTS) {
+            throw new Error(
+              `${pending.length} tester-history key(s) were still unprocessed after ${attempts} attempts.`
+            );
+          }
+          attempts++;
+          const result = await dynamo.send(
+            new BatchGetCommand({
+              RequestItems: {
+                [EVENT_LOG_TABLE]: {
+                  Keys: pending,
+                  ProjectionExpression: "eventId",
+                  // A missed marker would let a tester account into the formal
+                  // cohort; this gate may not read a stale replica.
+                  ConsistentRead: true,
+                },
+              },
+            })
+          );
+          for (const item of result.Responses?.[EVENT_LOG_TABLE] || []) {
+            if (item?.eventId) found.add(String(item.eventId));
+          }
+          pending = (result.UnprocessedKeys?.[EVENT_LOG_TABLE]?.Keys ||
+            []) as Array<{ eventId: string }>;
+        }
+      }
+      return found;
+    },
+    // Exact key reads so a purge preview states real existence rather than a guess.
+    getSurveyInstance: (moduleItemId: string, studentUserId: string) =>
+      getItem(SURVEY_INSTANCE_TABLE, { moduleItemId, studentUserId }, dynamo, CONSISTENT),
+    getStudentItemProgress: (moduleItemId: string, studentUserId: string) =>
+      getItem(PROGRESS_TABLE, { moduleItemId, studentUserId }, dynamo, CONSISTENT),
+    transactWrite: (transactItems: unknown[], clientRequestToken?: string) =>
+      transactWriteItems(
+        transactItems as Parameters<typeof transactWriteItems>[0],
+        dynamo,
+        { clientRequestToken }
+      ),
+    now: generateTimestamp,
+    tables: {
+      feedback: REVIEWER_FEEDBACK_TABLE,
+      surveyInstance: SURVEY_INSTANCE_TABLE,
+      studentItemProgress: PROGRESS_TABLE,
+      eventLog: EVENT_LOG_TABLE,
+      // Host of the Phase 3 flow-state attributes that serialise concurrent
+      // tester and formal imports (see phase3-import.ts buildFlowGuardUpdate).
+      moduleItem: MODULE_ITEM_TABLE,
+    },
+  };
+}
+
+/**
+ * Shared preamble: the module must exist, the caller must be an instructor of
+ * its course (admin passes globally, students are rejected), and every table
+ * the operation can touch must be configured.
+ */
+async function phase3ImportPreamble(caller: CallerIdentity, moduleId: string) {
+  const resolved = await resolveModuleCourseId(dynamo, moduleId);
+  if (!resolved) return { error: notFoundResponse("Module not found") };
+  const authError = await requireCourseInstructor(caller, resolved.courseId, dynamo);
+  if (authError) return { error: authError };
+  if (
+    !REVIEWER_FEEDBACK_TABLE ||
+    !SURVEY_INSTANCE_TABLE ||
+    !PROGRESS_TABLE ||
+    !EVENT_LOG_TABLE ||
+    !ENROLLMENT_TABLE
+  ) {
+    return {
+      error: serverErrorResponse(
+        "Phase 3 import is not configured (a required table name is missing)"
+      ),
+    };
+  }
+  return { courseId: resolved.courseId };
+}
+
+async function handlePhase3Status(caller: CallerIdentity, moduleId: string) {
+  const pre = await phase3ImportPreamble(caller, moduleId);
+  if (pre.error) return pre.error;
+  const outcome = await executePhase3Status(buildPhase3ImportDeps(), {
+    moduleId,
+    courseId: pre.courseId!,
+  });
+  return createResponse(outcome.status, outcome.body);
+}
+
+async function handlePhase3Import(
+  caller: CallerIdentity,
+  moduleId: string,
+  body: string | null,
+  commit: boolean
+) {
+  const pre = await phase3ImportPreamble(caller, moduleId);
+  if (pre.error) return pre.error;
+
+  const payload = parseJsonBody(body);
+  const mode = payload?.mode;
+  if (mode !== "tester" && mode !== "formal") {
+    return badRequestResponse('mode must be "tester" or "formal"');
+  }
+  const csvText = payload?.csv;
+  if (typeof csvText !== "string" || csvText.trim() === "") {
+    return badRequestResponse("csv (the raw file text) is required");
+  }
+  if (Buffer.byteLength(csvText, "utf8") > PHASE3_MAX_CSV_BYTES) {
+    return badRequestResponse(
+      `The uploaded CSV exceeds ${PHASE3_MAX_CSV_BYTES} bytes.`
+    );
+  }
+
+  const outcome = await executePhase3Import(buildPhase3ImportDeps(), {
+    moduleId,
+    courseId: pre.courseId!,
+    callerUserId: caller.userId,
+    mode: mode as Phase3ImportMode,
+    csvText,
+    commit,
+    expectedPlanHash: payload?.expectedPlanHash,
+    confirmTesterEmail: payload?.confirmTesterEmail,
+    confirmProvenance: payload?.confirmProvenance,
+    confirmFormalPhrase: payload?.confirmFormalPhrase,
+  });
+  return createResponse(outcome.status, outcome.body);
+}
+
+async function handlePhase3PurgeTesterRoute(
+  caller: CallerIdentity,
+  moduleId: string,
+  body: string | null
+) {
+  const pre = await phase3ImportPreamble(caller, moduleId);
+  if (pre.error) return pre.error;
+
+  const payload = parseJsonBody(body);
+  const scope = payload?.scope;
+  if (scope !== "one" && scope !== "all") {
+    return badRequestResponse('scope must be "one" or "all"');
+  }
+
+  const outcome = await executePhase3PurgeTester(buildPhase3ImportDeps(), {
+    moduleId,
+    courseId: pre.courseId!,
+    callerUserId: caller.userId,
+    scope,
+    studentUserId: payload?.studentUserId,
+    commit: payload?.commit === true,
+    confirmText: payload?.confirmText,
   });
   return createResponse(outcome.status, outcome.body);
 }
