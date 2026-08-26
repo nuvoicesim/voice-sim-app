@@ -810,13 +810,15 @@ export function buildFlowGuardUpdate(opts: {
   batchId?: string;
 }): unknown {
   const gen = generationCondition(opts.observedGeneration);
+  // DynamoDB rejects unused expression-attribute aliases, so each operation
+  // adds only the names referenced by its own update and condition expressions.
   const names: Record<string, string> = {
     "#gen": PHASE3_TESTER_GENERATION_ATTR,
-    "#formalAt": PHASE3_FORMAL_IMPORTED_AT_ATTR,
   };
   const values: Record<string, unknown> = { ...gen.values };
 
   if (opts.kind === "formal-commit") {
+    names["#formalAt"] = PHASE3_FORMAL_IMPORTED_AT_ATTR;
     names["#formalBatch"] = PHASE3_FORMAL_BATCH_ATTR;
     values[":now"] = opts.now;
     values[":batch"] = opts.batchId ?? "";
@@ -834,10 +836,11 @@ export function buildFlowGuardUpdate(opts: {
 
   const next = (opts.observedGeneration ?? 0) + 1;
   values[":next"] = next;
-  const condition =
-    opts.kind === "tester-import"
-      ? `attribute_not_exists(#formalAt) AND ${gen.expression}`
-      : gen.expression;
+  let condition = gen.expression;
+  if (opts.kind === "tester-import") {
+    names["#formalAt"] = PHASE3_FORMAL_IMPORTED_AT_ATTR;
+    condition = `attribute_not_exists(#formalAt) AND ${gen.expression}`;
+  }
   return {
     Update: {
       TableName: opts.moduleItemTable,
