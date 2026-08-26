@@ -1994,6 +1994,9 @@ describe("finding 4 — flow-level mutual exclusion", () => {
       now: NOW,
     }) as any;
     expect(unset.Update.ConditionExpression).toBe("attribute_not_exists(#gen)");
+    expect(unset.Update.ExpressionAttributeNames).toEqual({
+      "#gen": "_phase3TesterGeneration",
+    });
     expect(unset.Update.ExpressionAttributeValues[":next"]).toBe(1);
 
     const zero = buildFlowGuardUpdate({
@@ -2004,6 +2007,9 @@ describe("finding 4 — flow-level mutual exclusion", () => {
       now: NOW,
     }) as any;
     expect(zero.Update.ConditionExpression).toBe("#gen = :expectedGen");
+    expect(zero.Update.ExpressionAttributeNames).toEqual({
+      "#gen": "_phase3TesterGeneration",
+    });
     expect(zero.Update.ExpressionAttributeValues[":expectedGen"]).toBe(0);
   });
 
